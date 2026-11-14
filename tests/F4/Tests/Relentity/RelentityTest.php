@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace F4\Tests\Relentity;
 
+use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 use F4\Tests\Relentity\Fixtures\{
+    File,
     FileAttribute,
     FileTag,
     Tag,
@@ -120,6 +122,43 @@ final class RelentityTest extends TestCase
         $this->assertSame(
             'SELECT * FROM "file_tag" WHERE "deleted" = FALSE AND "active" = TRUE AND "pinned" = TRUE LIMIT 100',
             FileTag::fetch()->matching(['active' => true])->matching(['pinned' => true])->asSQL(),
+        );
+    }
+
+    public static function namedVariadicProvider(): array
+    {
+        return [
+            'matching' => ['matching', static fn(File $files): File => $files->matching(filters: ['visible' => true])],
+            'matching, column-like name' => ['matching', static fn(File $files): File => $files->matching(status: ['a', 'b'])],
+            'matching, after positional' => ['matching', static fn(File $files): File => $files->matching(['visible' => true], filters: ['pinned' => true])],
+            'sortedBy' => ['sortedBy', static fn(File $files): File => $files->sortedBy(criteria: ['name' => 'asc'])],
+            'with' => ['with', static fn(File $files): File => $files->with(relations: 'tags')],
+            'without' => ['without', static fn(File $files): File => $files->without(relations: 'tags')],
+            'concealing' => ['concealing', static fn(File $files): File => $files->concealing(columns: 'name')],
+            'revealing' => ['revealing', static fn(File $files): File => $files->revealing(columns: 'name')],
+        ];
+    }
+
+    #[DataProvider('namedVariadicProvider')]
+    public function testVariadicMethodsRejectNamedArguments(string $method, callable $call): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("{$method}() does not accept named arguments");
+        $call(File::fetch());
+    }
+
+    public function testVariadicMethodsAcceptPositionalAndSpreadArguments(): void
+    {
+        $this->assertSame(
+            'SELECT * FROM "file" WHERE "visible" = TRUE AND "pinned" = TRUE ORDER BY "name" ASC, "created" DESC LIMIT 100',
+            File::fetch()
+                ->matching(...[['visible' => true], ['pinned' => true]])
+                ->sortedBy(['name' => 'asc'], ['created' => 'desc'])
+                ->with(...[])
+                ->without('owner', 'tags')
+                ->concealing('passwordHash', ['token'])
+                ->revealing(...['token'])
+                ->asSQL(),
         );
     }
 

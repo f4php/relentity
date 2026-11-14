@@ -25,6 +25,7 @@ use F4\Relentity\{
 
 use function
     array_diff,
+    array_is_list,
     array_reduce,
     array_slice,
     array_unique,
@@ -204,6 +205,7 @@ class AbstractRelentity implements RelentityInterface
     }
     public function concealing(string|array ...$columns): static
     {
+        array_is_list($columns) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
         $this->concealing = array_reduce(
             array: $columns,
             callback: fn(array $carry, mixed $column): array => [...$carry, ...(array) $column],
@@ -213,6 +215,7 @@ class AbstractRelentity implements RelentityInterface
     }
     public function revealing(string|array ...$columns): static
     {
+        array_is_list($columns) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
         $this->revealing = array_reduce(
             array: $columns,
             callback: fn(array $carry, mixed $column): array => [...$carry, ...(array) $column],
@@ -253,6 +256,7 @@ class AbstractRelentity implements RelentityInterface
     }
     public function matching(array|ConditionCollection ...$filters): static
     {
+        array_is_list($filters) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
         $this->where = [...$this->where, ...$filters];
         return $this;
     }
@@ -265,11 +269,13 @@ class AbstractRelentity implements RelentityInterface
      */
     public function sortedBy(array|OrderCollection ...$criteria): static
     {
+        array_is_list($criteria) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
         $this->order = $criteria;
         return $this;
     }
     public function with(string ...$relations): static
     {
+        array_is_list($relations) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
         $this->relations = [
             ...$this->relations,
             ...$relations,
@@ -278,6 +284,7 @@ class AbstractRelentity implements RelentityInterface
     }
     public function without(string ...$relations): static
     {
+        array_is_list($relations) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
         $this->relations = array_values(array_diff(
             $this->relations,
             $relations,

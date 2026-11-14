@@ -234,3 +234,8 @@ $statement = Employees::fetch()
   ->asQuery();                            // QueryBuilderInterface, nothing executed
 ```
 
+`matching()`, `sortedBy()`, `with()`, `without()`, `concealing()` and `revealing()` take any
+number of positional arguments and reject named ones with an `InvalidArgumentException`:
+PHP would otherwise accept any name, so `matching(status: [...])` would silently filter by
+a `status` column.
+
