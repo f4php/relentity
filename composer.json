@@ -1,0 +1,38 @@
+{
+    "name": "f4php/relentity",
+    "description": "Relentity is an entity-focused layer on top of f4php/db query builder, core package for F4, a lightweight web development framework",
+    "keywords": ["f4","framework","database","repository","entity","relation","relentity"],
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "F4\\Relentity\\": "src/F4/Relentity"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "F4\\": "tests/F4"
+        }
+    },
+    "authors": [
+        {
+            "name": "Dennis Kreminsky",
+            "email": "dennis@kreminsky.com"
+        }
+    ],
+    "config": {
+        "optimize-autoloader": true
+    },
+    "scripts": {
+        "test": "phpunit --bootstrap tests/F4/Config.php --display-warnings --display-phpunit-deprecations --fail-on-deprecation tests",
+        "stan": "phpstan --level=5 analyse src tests"
+    },
+    "require": {
+        "php": "^8.5.12",
+        "f4php/db": "^0.4.4"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^12",
+        "phpstan/phpstan": "^2.0",
+        "phpstan/phpstan-phpunit": "^2.0"
+    }
+}
