@@ -6,39 +6,48 @@ namespace F4\Relentity\Relation;
 
 use Closure;
 
+use F4\DB\{
+    Fragment,
+    QueryBuilderInterface,
+};
 use F4\Relentity\{
     RelentityInterface,
     Relation\RelationInterface,
 };
 
-use F4\DB\{
-    Fragment,
-    QueryBuilderInterface,
-};
-
+/**
+ * Constructor arguments are the options of a RELATIONS entry. Subclasses that add
+ * options must repeat the shared ones in their constructor, so that named options resolve.
+ */
 abstract class AbstractRelation implements RelationInterface {
 
-    protected const string DEFAULT_JSONB_ALIAS = 'relation_jsonb';
+    protected const string VALUE_ALIAS = 'relation_value';
+    protected const string ROWS_ALIAS = 'relation_rows';
 
+    /**
+     * @param class-string<RelentityInterface> $target
+     */
     public function __construct(
-        protected RelentityInterface $source,
-        protected RelentityInterface $target,
-        protected string $targetAlias,
-        protected ?Closure $selectCallback = null,
-        protected ?Closure $joinCallback = null,
+        protected string $target,
+        protected ?string $sourceKey = null,
+        protected ?string $targetKey = null,
+        protected ?Closure $modifyTarget = null,
+        protected ?Closure $select = null,
+        protected ?Closure $join = null,
     ) {}
-    public function appendSelect(QueryBuilderInterface $query): QueryBuilderInterface {
-        return match($this->selectCallback) {
+
+    public function appendSelect(QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface {
+        return match ($this->select) {
             null => $query->select(
                 new Fragment('{#::#}.{#::#} AS {#::#}', [
-                    $query->escapeIdentifier($this->targetAlias),
-                    $query->escapeIdentifier(static::DEFAULT_JSONB_ALIAS),
-                    $query->escapeIdentifier($this->targetAlias),
+                    $query->escapeIdentifier($alias),
+                    $query->escapeIdentifier(static::VALUE_ALIAS),
+                    $query->escapeIdentifier($alias),
                 ])
             ),
-            default => ($this->selectCallback)($query),
+            default => ($this->select)($query, $source, $alias),
         };
     }
-    abstract public function appendJoin(QueryBuilderInterface $query): QueryBuilderInterface;
 
+    abstract public function appendJoin(QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface;
 }

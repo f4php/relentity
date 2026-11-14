@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace F4\Relentity;
 
+use Error;
 use InvalidArgumentException;
 use F4\DB;
 use F4\DB\{
     AssignmentCollection,
     ConditionCollection,
-    Fragment,
     OrderCollection,
     QueryBuilderInterface,
     SelectExpressionCollection,
@@ -19,19 +19,25 @@ use F4\Relentity\{
     ActionType,
     RelentityInterface,
     Exception\RelentityException,
+    Relation\OneToMany,
     Relation\RelationInterface,
 };
 
 use function
-    array_keys,
-    array_map,
-    sprintf
+    array_diff,
+    array_reduce,
+    array_slice,
+    array_unique,
+    array_values,
+    is_subclass_of
 ;
 
 class AbstractRelentity implements RelentityInterface
 {
-    public const string TABLE_NAME = self::TABLE_NAME;
-    public const string PRIMARY_KEY = self::PRIMARY_KEY;
+    // Must be redefined by every child, checked in the constructor. A self-referencing
+    // constant here would make PHP fail to instantiate children with closures in their constants
+    public const string TABLE_NAME = '';
+    public const string PRIMARY_KEY = '';
     public const array RELATIONS = [];
     public const string|array DEFAULT_SELECT = '*';
     public const array DEFAULT_WHERE = [];
@@ -58,6 +64,12 @@ class AbstractRelentity implements RelentityInterface
 
     final protected function __construct(private ActionType $actionType, private mixed $parameters = null)
     {
+        if (static::TABLE_NAME === '') {
+            throw new RelentityException(static::class . ' must define TABLE_NAME');
+        }
+        if (static::PRIMARY_KEY === '') {
+            throw new RelentityException(static::class . ' must define PRIMARY_KEY');
+        }
         switch($actionType) {
             case ActionType::Fetch:
                 $this->select = $parameters ?? static::DEFAULT_SELECT;
@@ -94,23 +106,33 @@ class AbstractRelentity implements RelentityInterface
     {
         return new static(ActionType::Delete);
     }
+    /**
+     * A RELATIONS entry is either a target class, or [TargetClass::class, RelationClass::class, 'option' => value, ...],
+     * where the relation class defaults to OneToMany and options are arguments of its constructor.
+     *
+     * @return array<string, RelationInterface>
+     */
     protected function getRelations(): array {
-        return array_map(
-            callback: function(string $alias): RelationInterface {
-                if(!($target = static::RELATIONS[$alias][0] ?? null)) {
-                    throw new InvalidArgumentException("Unknown relation entity for {$alias}");
-                }
-                if(!($relationType = static::RELATIONS[$alias][1] ?? null)) {
-                    throw new InvalidArgumentException("Unknown relation type for {$alias}");
-                }
-                return new $relationType(
-                    source: $this,
-                    target: $target::fetch(),
-                    targetAlias: $alias,
-                );
-            },
-            array: $this->relations,
-        );
+        $relations = [];
+        foreach (array_unique($this->relations) as $alias) {
+            $location = static::class . "::RELATIONS['{$alias}']";
+            $declaration = (array) (static::RELATIONS[$alias] ?? throw new InvalidArgumentException("Unknown relation {$location}"));
+            $target = $declaration[0] ?? null;
+            $relationType = $declaration[1] ?? OneToMany::class;
+            if (!is_subclass_of($target, RelentityInterface::class)) {
+                throw new InvalidArgumentException("Position 0 of {$location} must be a " . RelentityInterface::class . ' class');
+            }
+            if (!is_subclass_of($relationType, RelationInterface::class)) {
+                throw new InvalidArgumentException("Position 1 of {$location} must be a " . RelationInterface::class . ' class');
+            }
+            try {
+                $relations[$alias] = new $relationType($target, ...array_slice($declaration, 2));
+            } catch (Error $e) {
+                // Unknown, missing or mistyped options
+                throw new InvalidArgumentException("Invalid declaration of {$location}: {$e->getMessage()}", previous: $e);
+            }
+        }
+        return $relations;
     }
     public function asQuery(
         null|array|string|SelectExpressionCollection $selectExpression = null,
@@ -121,12 +143,12 @@ class AbstractRelentity implements RelentityInterface
             case ActionType::Fetch:
                 $query = DB::select($selectExpression ?: $this->select);
                 $relations = $this->getRelations();
-                foreach($relations as $relation) {
-                    $relation->appendSelect($query);
+                foreach($relations as $alias => $relation) {
+                    $relation->appendSelect($query, $this, $alias);
                 }
                 $query->from(static::TABLE_NAME);
-                foreach($relations as $relation) {
-                    $relation->appendJoin($query);
+                foreach($relations as $alias => $relation) {
+                    $relation->appendJoin($query, $this, $alias);
                 }
                 break;
             case ActionType::Update:
@@ -217,6 +239,7 @@ class AbstractRelentity implements RelentityInterface
     }
     public function asCount(): int
     {
+        $this->limit = null;
         return $this
             ->asQuery('COUNT(*)')
             ->asValue(index: 0);
@@ -241,10 +264,10 @@ class AbstractRelentity implements RelentityInterface
     }
     public function without(string ...$relations): static
     {
-        $this->relations = array_diff_key(
+        $this->relations = array_values(array_diff(
             $this->relations,
             $relations,
-        );
+        ));
         return $this;
     }
 }

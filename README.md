@@ -36,12 +36,17 @@ Some entities are more complex and may have relations to other entities, here's 
 
 use F4\Relentity\{
   AbstractRelentity,
-  RelationType,
   RelentityInterface,
+  Relation\ManyToMany,
+  Relation\OneToMany,
+  Relation\OneToOne,
 };
 
 use MyApp\{
   Contractors,
+  EmployeeSkills,
+  Projects,
+  Skills,
   Timesheets,
   Vacations,
 };
@@ -57,11 +62,19 @@ class Employees extends AbstractRelentity implements RelentityInterface {
 
   // define relations declaratively
   public const array RELATIONS = [
-    'vacations' => Vacations::class, // simple relation, assumes RelationType::OneToMany by default and uses primary keys for both entities
-    'contractor' => [Contractors::class, RelationType::OneToOne],
-    'timesheets' => [Timesheets::class, static function () {
-      //  custom relation handling
-    }],
+    'vacations' => Vacations::class,                           // shorthand for [Vacations::class, OneToMany::class]
+    'contractor' => [Contractors::class, OneToOne::class,      // "belongs to": the key lives on the source
+      'sourceKey' => 'contractorUUID',
+      'targetKey' => 'contractorUUID',
+    ],
+    'skills' => [Skills::class, ManyToMany::class, 'through' => EmployeeSkills::class],  // link table as an entity
+    'projects' => [Projects::class, ManyToMany::class, 'through' => 'employee_project'], // or just a table name
+    'recentTimesheets' => [Timesheets::class, OneToMany::class,
+      'modifyTarget' => static function (Timesheets $timesheets): Timesheets {
+        return $timesheets->sortedBy(['date' => 'desc'])->limit(10);
+      },
+    ],
+    'timesheetCount' => [Timesheets::class, OneToMany::class, 'count' => true],
   ];
 
   public function enabled(): static {
@@ -71,6 +84,99 @@ class Employees extends AbstractRelentity implements RelentityInterface {
   }
 };
 ```
+
+### Declaring relations
+
+Every `RELATIONS` entry is keyed by the relation alias, which is also the name of the
+result column holding the related data. The entity declaring the relation is the **source**,
+the related entity is the **target**.
+
+An entry is either a target class, or an array of the target class, the relation class
+(`OneToMany` when omitted) and any named options:
+
+```php
+'alias' => [TargetClass::class, RelationClass::class, 'option' => $value, ...],
+```
+
+Options are named arguments of the relation class constructor, so a misspelled or
+mistyped option fails with a clear error naming the relation, e.g.
+`Invalid declaration of Employees::RELATIONS['skills']: Unknown named parameter $tragetKey`.
+Every option except `through` of a `ManyToMany` relation has a default, so most
+relations need none:
+
+| Option | OneToOne | OneToMany | ManyToMany | Purpose |
+|---|---|---|---|---|
+| `sourceKey` | `source::PRIMARY_KEY` | `source::PRIMARY_KEY` | `source::PRIMARY_KEY` | column on the source table |
+| `targetKey` | `source::PRIMARY_KEY` | `source::PRIMARY_KEY` | `target::PRIMARY_KEY` | column on the target table |
+| `through` | — | — | **required** | link table name or Relentity class |
+| `throughSourceKey` | — | — | `source::PRIMARY_KEY` | link-table column pointing to the source |
+| `throughTargetKey` | — | — | `target::PRIMARY_KEY` | link-table column pointing to the target |
+| `modifyTarget` | `null` | `null` | `null` | `Closure(target): target`, modifies the target query |
+| `modifyThrough` | — | — | `null` | `Closure(through): through`, requires `through` to be a Relentity class |
+| `count` | — | `false` | `false` | return the number of related rows instead of the rows |
+| `select` | `null` | `null` | `null` | `Closure($query, $source, $alias): $query`, replaces the select expression |
+| `join` | `null` | `null` | `null` | `Closure($query, $source, $alias): $query`, replaces the join |
+
+#### Modifying the target
+
+`modifyTarget` receives the target Relentity and returns it modified, so filtering,
+sorting, limits and nested relations use the same methods as any other query. PHP allows
+two closure forms in a class constant.
+
+An inline `static function`, for a modification used by one relation (arrow functions
+`fn` are not allowed in constants):
+
+```php
+'recentTimesheets' => [Timesheets::class, OneToMany::class,
+  'modifyTarget' => static function (Timesheets $timesheets): Timesheets {
+    return $timesheets
+      ->matching(['approved' => true])
+      ->sortedBy(['date' => 'desc'])
+      ->limit(10);
+  },
+],
+```
+
+A first-class callable to a **static** method, for a modification that is reused:
+
+```php
+class Timesheets extends AbstractRelentity implements RelentityInterface {
+  // ...
+  public static function approved(self $timesheets): self {
+    return $timesheets->matching(['approved' => true]);
+  }
+}
+
+'approvedTimesheets' => [Timesheets::class, OneToMany::class,
+  'modifyTarget' => Timesheets::approved(...),
+],
+```
+
+#### Link tables
+
+A `ManyToMany` relation always names its link table in `through`. A plain table name is
+enough when the table only holds the two keys:
+
+```php
+'projects' => [Projects::class, ManyToMany::class, 'through' => 'employee_project'],
+
+// with key columns that are not named after the primary keys
+'projects' => [Projects::class, ManyToMany::class,
+  'through' => 'employee_project',
+  'throughSourceKey' => 'employeeId',
+  'throughTargetKey' => 'projectId',
+],
+```
+
+A link table declared as a Relentity class applies its own `DEFAULT_WHERE`, and
+`modifyThrough` modifies it the same way `modifyTarget` modifies the target.
+
+#### Custom relations
+
+For anything the options can't express, write a relation class implementing
+`RelationInterface` (extending `AbstractRelation` gives you the defaults) and use it in
+position 1 with its own named options. As a last resort, `select` and `join` replace the
+generated SQL of a single relation.
 
 ### Fetching the data
 
@@ -83,7 +189,7 @@ Employees::fetch()
     ->asTable();
 
 Employees::fetch()
-  ->with('timesheets')                    // add non-default relation on demand
+  ->with('recentTimesheets')              // add non-default relation on demand
   ->without('contractor')                 // omit default relation on demand
   ->enabled()                             // custom shorthand filter
   ->asCount();                            // COUNT(*) projection
