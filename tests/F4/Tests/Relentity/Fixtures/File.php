@@ -33,7 +33,7 @@ class File extends AbstractRelentity implements RelentityInterface
                 return $attributes
                     ->matching(['visible' => true])
                     ->sortedBy(['created' => 'desc'])
-                    ->limit(5);
+                    ->limitedTo(5);
             },
         ],
         'attributeCount' => [FileAttribute::class, OneToMany::class, 'count' => true],

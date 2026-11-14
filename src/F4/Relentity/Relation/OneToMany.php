@@ -44,7 +44,7 @@ class OneToMany extends AbstractRelation implements RelationInterface {
         $target = $this->target::fetch();
         if ($this->count) {
             // The target's DEFAULT_LIMIT must not cap a count
-            $target->limit(null);
+            $target->limitedTo(null, 0);
         }
         if ($this->modifyTarget) {
             $target = ($this->modifyTarget)($target);

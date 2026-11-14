@@ -90,9 +90,9 @@ class AbstractRelentity implements RelentityInterface
         $this->relations = static::DEFAULT_RELATIONS;
         $this->adapter = static::DEFAULT_ADAPTER;
     }
-    public static function fetch(null|string|array|SelectExpressionCollection $select = null): static
+    public static function fetch(null|string|array|SelectExpressionCollection $columns = null): static
     {
-        return new static(ActionType::Fetch, $select);
+        return new static(ActionType::Fetch, $columns);
     }
     public static function update(array $changes): static
     {
@@ -135,13 +135,13 @@ class AbstractRelentity implements RelentityInterface
         return $relations;
     }
     public function asQuery(
-        null|array|string|SelectExpressionCollection $selectExpression = null,
+        null|array|string|SelectExpressionCollection $columns = null,
         ?string $returning = null,
     ): QueryBuilderInterface
     {
         switch ($this->actionType) {
             case ActionType::Fetch:
-                $query = DB::select($selectExpression ?: $this->select);
+                $query = DB::select($columns ?: $this->select);
                 $relations = $this->getRelations();
                 foreach($relations as $alias => $relation) {
                     $relation->appendSelect($query, $this, $alias);
@@ -198,11 +198,11 @@ class AbstractRelentity implements RelentityInterface
     {
         return $this->asQuery()->asTable();
     }
-    public function asValue(string|int $index = 0): mixed
+    public function asValue(string|int $column = 0): mixed
     {
-        return $this->asQuery()->asValue($index);
+        return $this->asQuery()->asValue($column);
     }
-    public function concealing(...$columns): static
+    public function concealing(string|array ...$columns): static
     {
         $this->concealing = array_reduce(
             array: $columns,
@@ -211,7 +211,7 @@ class AbstractRelentity implements RelentityInterface
         );
         return $this;
     }
-    public function revealing(...$columns): static
+    public function revealing(string|array ...$columns): static
     {
         $this->revealing = array_reduce(
             array: $columns,
@@ -220,17 +220,22 @@ class AbstractRelentity implements RelentityInterface
         );
         return $this;
     }
-    public function limit(?int $limit, ?int $offset = null): static
+    public function unlimited(): static
     {
-        $this->limit = $limit;
-        if ($offset !== null) {
-            $this->offset = $offset;
+        $this->limit = null;
+        return $this;
+    }
+    public function limitedTo(?int $rows, ?int $skipping = null): static
+    {
+        $this->limit = $rows;
+        if ($skipping !== null) {
+            $this->offset = $skipping;
         }
         return $this;
     }
-    public function offset(int $offset): static
+    public function skipping(int $rows): static
     {
-        $this->offset = $offset;
+        $this->offset = $rows;
         return $this;
     }
     public function execute(): void
@@ -239,8 +244,10 @@ class AbstractRelentity implements RelentityInterface
     }
     public function asCount(): int
     {
-        $this->limit = null;
-        return $this
+        return (clone $this)
+            ->without(...$this->relations)
+            ->sortedBy([])
+            ->limitedTo(null, 0)
             ->asQuery('COUNT(*)')
             ->asValue(index: 0);
     }
@@ -249,9 +256,16 @@ class AbstractRelentity implements RelentityInterface
         $this->where = [...$this->where, ...$filters];
         return $this;
     }
-    public function sortedBy(array|OrderCollection ...$order): static
+    /**
+     * Replaces the current ordering, DEFAULT_ORDER included, instead of adding to it, and
+     * removes it when called without arguments. Unlike matching(), with(), concealing() and
+     * revealing(), which add to what is already set, repeated calls do not accumulate:
+     * prepending to a default ordering would rarely be useful, and appending would have no
+     * visible effect. Pass all criteria in a single call.
+     */
+    public function sortedBy(array|OrderCollection ...$criteria): static
     {
-        $this->order = $order;
+        $this->order = $criteria;
         return $this;
     }
     public function with(string ...$relations): static

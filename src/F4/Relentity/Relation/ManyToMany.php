@@ -72,7 +72,7 @@ class ManyToMany extends AbstractRelation implements RelationInterface {
         ]);
         if ($throughIsEntity) {
             // Every link counts, the link entity's DEFAULT_LIMIT does not apply
-            $through = $this->through::fetch([$throughTargetKey])->limit(null);
+            $through = $this->through::fetch([$throughTargetKey])->limitedTo(null, 0);
             if ($this->modifyThrough) {
                 $through = ($this->modifyThrough)($through);
             }
@@ -84,7 +84,7 @@ class ManyToMany extends AbstractRelation implements RelationInterface {
         $target = $this->target::fetch();
         if ($this->count) {
             // The target's DEFAULT_LIMIT must not cap a count
-            $target->limit(null);
+            $target->limitedTo(null, 0);
         }
         if ($this->modifyTarget) {
             $target = ($this->modifyTarget)($target);

@@ -26,7 +26,7 @@ class OneToOne extends AbstractRelation implements RelationInterface {
             return ($this->join)($query, $source, $alias);
         }
         // More than one row would duplicate source rows
-        $target = $this->target::fetch()->limit(1);
+        $target = $this->target::fetch()->limitedTo(1);
         if ($this->modifyTarget) {
             $target = ($this->modifyTarget)($target);
         }

@@ -74,7 +74,7 @@ class Employees extends AbstractRelentity implements RelentityInterface {
     'projects' => [Projects::class, ManyToMany::class, 'through' => 'employee_project'], // or just a table name
     'recentTimesheets' => [Timesheets::class, OneToMany::class,
       'modifyTarget' => static function (Timesheets $timesheets): Timesheets {
-        return $timesheets->sortedBy(['date' => 'desc'])->limit(10);
+        return $timesheets->sortedBy(['date' => 'desc'])->limitedTo(10);
       },
     ],
     'timesheetCount' => [Timesheets::class, OneToMany::class, 'count' => true],
@@ -90,8 +90,8 @@ class Employees extends AbstractRelentity implements RelentityInterface {
 
 ### Query defaults
 
-`DEFAULT_SELECT`, `DEFAULT_WHERE` and `DEFAULT_LIMIT` shape every statement of the entity,
-and each one can be overridden or extended per query:
+`DEFAULT_SELECT`, `DEFAULT_WHERE`, `DEFAULT_ORDER` and `DEFAULT_LIMIT` shape every statement
+of the entity, and each one can be overridden or extended per query:
 
 ```php
 Employees::fetch();
@@ -99,13 +99,22 @@ Employees::fetch();
 
 Employees::fetch('*')                     // fetch() arguments replace DEFAULT_SELECT
   ->matching(['enabled' => true])         // matching() adds to DEFAULT_WHERE
-  ->limit(10);                            // limit() replaces DEFAULT_LIMIT, limit(null) removes it
-// SELECT * FROM "employee" WHERE "deleted" = FALSE AND "enabled" = TRUE ORDER BY "name" ASC LIMIT 10
+  ->sortedBy(['email' => 'asc'])          // sortedBy() replaces DEFAULT_ORDER
+  ->limitedTo(10);                        // limitedTo() replaces DEFAULT_LIMIT
+// SELECT * FROM "employee" WHERE "deleted" = FALSE AND "enabled" = TRUE ORDER BY "email" ASC LIMIT 10
+
+Employees::fetch()
+  ->sortedBy()                            // no arguments: removes the ordering
+  ->unlimited();                          // removes the limit, same as limitedTo(null)
+// SELECT "employeeUUID", "name", "email", "passwordHash" FROM "employee" WHERE "deleted" = FALSE
 ```
 
 - `DEFAULT_SELECT` is `'*'` unless redefined, and accepts anything `select()` does.
 - `DEFAULT_WHERE` also applies to `update()` and `delete()`, so with the definition above
   `Employees::delete()` never touches rows marked as deleted.
+- `DEFAULT_ORDER` is empty unless redefined. Unlike `matching()`, `with()`, `concealing()`
+  and `revealing()`, which add to what is already set, `sortedBy()` replaces the ordering,
+  so pass all criteria in a single call. It only applies to `fetch()`.
 - `DEFAULT_LIMIT` is `100` unless redefined, set it to `null` for entities that should be
   fetched without a limit. It only applies to `fetch()`.
 
@@ -158,7 +167,7 @@ An inline `static function`, for a modification used by one relation (arrow func
     return $timesheets
       ->matching(['approved' => true])
       ->sortedBy(['date' => 'desc'])
-      ->limit(10);
+      ->limitedTo(10);
   },
 ],
 ```
@@ -211,7 +220,7 @@ Employees::fetch()
     ->with('vacations')                   // relations are included on demand in addition to default ones
     ->matching(['enabled' => true])       // criteria that are accepted by where()
     ->sortedBy(['name' => 'asc'])
-    ->limit(10, offset: 20)
+    ->limitedTo(10, skipping: 20)         // or ->limitedTo(10)->skipping(20)
     ->asTable();
 
 Employees::fetch()
