@@ -55,6 +55,9 @@ class Employees extends AbstractRelentity implements RelentityInterface {
 
   public const string TABLE_NAME = 'employee';                 // define primary entity table
   public const string PRIMARY_KEY = 'employeeUUID';            // and primary key
+  public const string|array DEFAULT_SELECT = ['employeeUUID', 'name', 'email', 'passwordHash']; // instead of *
+  public const array DEFAULT_WHERE = ['deleted' => false];     // applied to every statement
+  public const ?int DEFAULT_LIMIT = 50;                        // instead of 100, null for no limit
   public const array DEFAULT_CONCEALING = ['passwordHash'];    // columns hidden unless revealed
   public const array DEFAULT_REVEALING = [];
   public const array DEFAULT_ORDER = ['name' => 'asc'];
@@ -84,6 +87,29 @@ class Employees extends AbstractRelentity implements RelentityInterface {
   }
 };
 ```
+
+### Query defaults
+
+`DEFAULT_SELECT`, `DEFAULT_WHERE` and `DEFAULT_LIMIT` shape every statement of the entity,
+and each one can be overridden or extended per query:
+
+```php
+Employees::fetch();
+// SELECT "employeeUUID", "name", "email", "passwordHash" FROM "employee" WHERE "deleted" = FALSE ORDER BY "name" ASC LIMIT 50
+
+Employees::fetch('*')                     // fetch() arguments replace DEFAULT_SELECT
+  ->matching(['enabled' => true])         // matching() adds to DEFAULT_WHERE
+  ->limit(10);                            // limit() replaces DEFAULT_LIMIT, limit(null) removes it
+// SELECT * FROM "employee" WHERE "deleted" = FALSE AND "enabled" = TRUE ORDER BY "name" ASC LIMIT 10
+```
+
+- `DEFAULT_SELECT` is `'*'` unless redefined, and accepts anything `select()` does.
+- `DEFAULT_WHERE` also applies to `update()` and `delete()`, so with the definition above
+  `Employees::delete()` never touches rows marked as deleted.
+- `DEFAULT_LIMIT` is `100` unless redefined, set it to `null` for entities that should be
+  fetched without a limit. It only applies to `fetch()`.
+
+When the entity is the target of a relation, the same defaults apply to the related rows.
 
 ### Declaring relations
 
