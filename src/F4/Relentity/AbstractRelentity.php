@@ -205,7 +205,7 @@ class AbstractRelentity implements RelentityInterface
             $query->returning($returning ?? $this->returning);
         }
         // Only takes effect when this query is executed itself: as the target of a relation
-        // the same list is applied in SQL by the relation, see AbstractRelation::rowsAsJsonb()
+        // the same list is applied in SQL by the relation, see AbstractRelation::buildRowsAsJsonb()
         $query->concealing($this->getConcealedColumns());
         return $query;
     }

@@ -64,11 +64,11 @@ class ManyToMany extends AbstractRelation implements RelationInterface {
             $query->escapeIdentifier($throughTable),
             $query->escapeIdentifier($this->throughTargetKey ?? $this->target::PRIMARY_KEY),
         ]);
-        $throughCondition = new Fragment('{#::#}.{#::#} = {#::#}.{#::#}', [
+        $sourceKey = $this->sourceKey ?? $source::PRIMARY_KEY;
+        $throughCondition = new Fragment('{#::#}.{#::#} = {#::#}', [
             $query->escapeIdentifier($throughTable),
             $query->escapeIdentifier($this->throughSourceKey ?? $source::PRIMARY_KEY),
-            $query->escapeIdentifier($source::TABLE_NAME),
-            $query->escapeIdentifier($this->sourceKey ?? $source::PRIMARY_KEY),
+            $this->buildSourceKeyReference($query, $source, $sourceKey),
         ]);
         if ($throughIsEntity) {
             // Every link counts, the link entity's DEFAULT_LIMIT does not apply
@@ -98,16 +98,10 @@ class ManyToMany extends AbstractRelation implements RelationInterface {
         ]);
         return $query
             ->leftJoinLateral([
-                $alias => DB::select(match ($this->count) {
-                    true => new Fragment('count(*) AS {#::#}', [
-                        $query->escapeIdentifier($alias),
-                    ]),
-                    default => new Fragment('jsonb_agg({#::#}) AS {#::#}', [
-                        $this->rowsAsJsonb($query, $target),
-                        $query->escapeIdentifier($alias),
-                    ]),
-                })
-                ->from([static::ROWS_ALIAS => $target->asQuery()]),
+                $alias => $this->buildJoinSubquery($query, $source, $sourceKey, $target, match ($this->count) {
+                    true => new Fragment('count(*)'),
+                    default => new Fragment('jsonb_agg({#::#})', [$this->buildRowsAsJsonb($query, $target)]),
+                }),
             ])
             ->on('true');
     }

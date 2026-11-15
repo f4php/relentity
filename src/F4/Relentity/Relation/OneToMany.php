@@ -6,7 +6,6 @@ namespace F4\Relentity\Relation;
 
 use Closure;
 
-use F4\DB;
 use F4\DB\{
     Fragment,
     QueryBuilderInterface,
@@ -49,26 +48,20 @@ class OneToMany extends AbstractRelation implements RelationInterface {
         if ($this->modifyTarget) {
             $target = ($this->modifyTarget)($target);
         }
+        $sourceKey = $this->sourceKey ?? $source::PRIMARY_KEY;
         $target->matching([
-            new Fragment('{#::#}.{#::#} = {#::#}.{#::#}', [
+            new Fragment('{#::#}.{#::#} = {#::#}', [
                 $query->escapeIdentifier($this->target::TABLE_NAME),
                 $query->escapeIdentifier($this->targetKey ?? $source::PRIMARY_KEY),
-                $query->escapeIdentifier($source::TABLE_NAME),
-                $query->escapeIdentifier($this->sourceKey ?? $source::PRIMARY_KEY),
+                $this->buildSourceKeyReference($query, $source, $sourceKey),
             ]),
         ]);
         return $query
             ->leftJoinLateral([
-                $alias => DB::select(match ($this->count) {
-                        true => new Fragment('count(*) AS {#::#}', [
-                            $query->escapeIdentifier($alias),
-                        ]),
-                        default => new Fragment('jsonb_agg({#::#}) AS {#::#}', [
-                            $this->rowsAsJsonb($query, $target),
-                            $query->escapeIdentifier($alias),
-                        ]),
-                    })
-                    ->from([static::ROWS_ALIAS => $target->asQuery()]),
+                $alias => $this->buildJoinSubquery($query, $source, $sourceKey, $target, match ($this->count) {
+                    true => new Fragment('count(*)'),
+                    default => new Fragment('jsonb_agg({#::#})', [$this->buildRowsAsJsonb($query, $target)]),
+                }),
             ])
             ->on('true');
     }

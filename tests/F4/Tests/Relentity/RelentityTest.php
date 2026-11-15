@@ -247,23 +247,23 @@ final class RelentityTest extends TestCase
             ],
             'relation columns are kept' => [
                 static fn(): OwnedFile => OwnedFile::fetch()->selecting(['name']),
-                'SELECT "name", "owner"."owner" FROM "file"'
-                    . ' LEFT JOIN LATERAL (SELECT to_jsonb("relation_rows".*) AS "owner" FROM'
-                    . ' (SELECT * FROM "user" WHERE "user"."userUUID" = "file"."ownerUUID" LIMIT 1) AS "relation_rows") AS "owner" ON true'
+                'SELECT "name", "owner"."relation_rows" AS "owner" FROM "file"'
+                    . ' LEFT JOIN LATERAL (SELECT to_jsonb("user".*) AS "relation_rows" FROM'
+                    . ' (SELECT * FROM "user" WHERE "user"."userUUID" = "file"."ownerUUID" LIMIT 1) AS "user") AS "owner" ON true'
                     . ' LIMIT 100',
             ],
             'a wildcard argument is qualified when there are relations' => [
                 static fn(): OwnedFile => OwnedFile::fetch()->selecting('*', 'name'),
-                'SELECT "file".*, "name", "owner"."owner" FROM "file"'
-                    . ' LEFT JOIN LATERAL (SELECT to_jsonb("relation_rows".*) AS "owner" FROM'
-                    . ' (SELECT * FROM "user" WHERE "user"."userUUID" = "file"."ownerUUID" LIMIT 1) AS "relation_rows") AS "owner" ON true'
+                'SELECT "file".*, "name", "owner"."relation_rows" AS "owner" FROM "file"'
+                    . ' LEFT JOIN LATERAL (SELECT to_jsonb("user".*) AS "relation_rows" FROM'
+                    . ' (SELECT * FROM "user" WHERE "user"."userUUID" = "file"."ownerUUID" LIMIT 1) AS "user") AS "owner" ON true'
                     . ' LIMIT 100',
             ],
             'a wildcard inside an array argument is qualified when there are relations' => [
                 static fn(): OwnedFile => OwnedFile::fetch()->selecting(['*', 'name']),
-                'SELECT "file".*, "name", "owner"."owner" FROM "file"'
-                    . ' LEFT JOIN LATERAL (SELECT to_jsonb("relation_rows".*) AS "owner" FROM'
-                    . ' (SELECT * FROM "user" WHERE "user"."userUUID" = "file"."ownerUUID" LIMIT 1) AS "relation_rows") AS "owner" ON true'
+                'SELECT "file".*, "name", "owner"."relation_rows" AS "owner" FROM "file"'
+                    . ' LEFT JOIN LATERAL (SELECT to_jsonb("user".*) AS "relation_rows" FROM'
+                    . ' (SELECT * FROM "user" WHERE "user"."userUUID" = "file"."ownerUUID" LIMIT 1) AS "user") AS "owner" ON true'
                     . ' LIMIT 100',
             ],
         ];

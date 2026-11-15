@@ -6,6 +6,7 @@ namespace F4\Relentity\Relation;
 
 use Closure;
 
+use F4\DB;
 use F4\DB\{
     Fragment,
     QueryBuilderInterface,
@@ -26,7 +27,17 @@ use function
  */
 abstract class AbstractRelation implements RelationInterface {
 
-    protected const string ROWS_ALIAS = 'relation_rows';
+    /**
+     * Name of the only column of the joined subquery, selected under the relation alias.
+     */
+    protected const string ROWS_COLUMN = 'relation_rows';
+
+    /**
+     * A target stored in the source table shadows the source inside its own subquery, so the
+     * source key is exposed to it under these names instead, see buildJoinSubquery().
+     */
+    protected const string SOURCE_KEY_ALIAS = 'relation_source';
+    protected const string SOURCE_KEY_COLUMN = 'key';
 
     /**
      * @param class-string<RelentityInterface> $target
@@ -43,9 +54,9 @@ abstract class AbstractRelation implements RelationInterface {
     public function appendSelect(QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface {
         return match ($this->customSelectCallback) {
             null => $query->select(
-                // The joined subquery names its only column after the relation alias
-                new Fragment('{#::#}.{#::#}', [
+                new Fragment('{#::#}.{#::#} AS {#::#}', [
                     $query->escapeIdentifier($alias),
+                    $query->escapeIdentifier(static::ROWS_COLUMN),
                     $query->escapeIdentifier($alias),
                 ])
             ),
@@ -58,7 +69,7 @@ abstract class AbstractRelation implements RelationInterface {
      * a subquery here, so concealment the query builder applies to executed queries never reaches it.
      * Must be called once the target is final, i.e. after modifyTarget.
      */
-    protected function rowsAsJsonb(QueryBuilderInterface $query, RelentityInterface $target): Fragment {
+    protected function buildRowsAsJsonb(QueryBuilderInterface $query, RelentityInterface $target): Fragment {
         $keys = [];
         $paths = [];
         foreach ($target->getConcealedColumns() as $column) {
@@ -70,7 +81,8 @@ abstract class AbstractRelation implements RelationInterface {
             }
         }
         $expression = 'to_jsonb({#::#}.*)';
-        $parameters = [$query->escapeIdentifier(static::ROWS_ALIAS)];
+        // The subquery of target rows is aliased by the target table name
+        $parameters = [$query->escapeIdentifier($target::TABLE_NAME)];
         // The casts are required, bound parameters alone would leave the operators ambiguous
         if ($keys) {
             $expression .= ' - ARRAY[{#,...#}]::text[]';
@@ -82,6 +94,57 @@ abstract class AbstractRelation implements RelationInterface {
             $parameters[] = $segments;
         }
         return new Fragment($expression, $parameters);
+    }
+
+    protected function isSelfReferencing(RelentityInterface $source): bool {
+        return $this->target::TABLE_NAME === $source::TABLE_NAME;
+    }
+
+    /**
+     * The source key column, as the target query must refer to it.
+     */
+    protected function buildSourceKeyReference(QueryBuilderInterface $query, RelentityInterface $source, string $sourceKey): Fragment {
+        return new Fragment('{#::#}.{#::#}', match ($this->isSelfReferencing($source)) {
+            true => [
+                $query->escapeIdentifier(static::SOURCE_KEY_ALIAS),
+                $query->escapeIdentifier(static::SOURCE_KEY_COLUMN),
+            ],
+            default => [
+                $query->escapeIdentifier($source::TABLE_NAME),
+                $query->escapeIdentifier($sourceKey),
+            ],
+        });
+    }
+
+    /**
+     * The joined subquery: $expression selected from the target rows, which are aliased by the target table name.
+     * The target query must be correlated through buildSourceKeyReference() of the same $sourceKey.
+     */
+    protected function buildJoinSubquery(
+        QueryBuilderInterface $query,
+        RelentityInterface $source,
+        string $sourceKey,
+        RelentityInterface $target,
+        Fragment $expression,
+    ): QueryBuilderInterface {
+        $select = DB::select(new Fragment('{#::#} AS {#::#}', [
+            $expression,
+            $query->escapeIdentifier(static::ROWS_COLUMN),
+        ]));
+        $rows = [$this->target::TABLE_NAME => $target->asQuery()];
+        if (!$this->isSelfReferencing($source)) {
+            return $select->from($rows);
+        }
+        // Selected outside of the target query, where the table name still refers to the source
+        return $select
+            ->from([
+                static::SOURCE_KEY_ALIAS => DB::select(new Fragment('{#::#}.{#::#} AS {#::#}', [
+                    $query->escapeIdentifier($source::TABLE_NAME),
+                    $query->escapeIdentifier($sourceKey),
+                    $query->escapeIdentifier(static::SOURCE_KEY_COLUMN),
+                ])),
+            ])
+            ->crossJoinLateral($rows);
     }
 
     abstract public function appendJoin(QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface;

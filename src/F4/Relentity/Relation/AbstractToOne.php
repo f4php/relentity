@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace F4\Relentity\Relation;
 
-use F4\DB;
 use F4\DB\{
     Fragment,
     QueryBuilderInterface,
@@ -35,23 +34,17 @@ abstract class AbstractToOne extends AbstractRelation implements RelationInterfa
         if ($this->modifyTarget) {
             $target = ($this->modifyTarget)($target);
         }
+        $sourceKey = $this->sourceKey ?? $this->defaultKey($source);
         $target->matching([
-            new Fragment('{#::#}.{#::#} = {#::#}.{#::#}', [
+            new Fragment('{#::#}.{#::#} = {#::#}', [
                 $query->escapeIdentifier($this->target::TABLE_NAME),
                 $query->escapeIdentifier($this->targetKey ?? $this->defaultKey($source)),
-                $query->escapeIdentifier($source::TABLE_NAME),
-                $query->escapeIdentifier($this->sourceKey ?? $this->defaultKey($source)),
+                $this->buildSourceKeyReference($query, $source, $sourceKey),
             ]),
         ]);
         return $query
             ->leftJoinLateral([
-                $alias => DB::select(
-                        new Fragment('{#::#} AS {#::#}', [
-                            $this->rowsAsJsonb($query, $target),
-                            $query->escapeIdentifier($alias),
-                        ])
-                    )
-                    ->from([static::ROWS_ALIAS => $target->asQuery()]),
+                $alias => $this->buildJoinSubquery($query, $source, $sourceKey, $target, $this->buildRowsAsJsonb($query, $target)),
             ])
             ->on('true');
     }

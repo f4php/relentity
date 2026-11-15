@@ -137,8 +137,19 @@ executed on its own:
 
 ```php
 Employees::fetch()->with('manager')->asSQL();
-// SELECT ..., "manager"."manager" FROM "employee" LEFT JOIN LATERAL (
-//   SELECT to_jsonb("relation_rows".*) - ARRAY['passwordHash']::text[] AS "manager" FROM (...) AS "relation_rows"
+// SELECT ..., "manager"."relation_rows" AS "manager" FROM "employee" LEFT JOIN LATERAL (
+//   SELECT to_jsonb("employee".*) - ARRAY['passwordHash']::text[] AS "relation_rows" FROM (...) AS "employee"
+// ) AS "manager" ON true ...
+```
+
+A relation may target the entity's own table, like `manager` above. Inside the subquery of
+related rows the table name then refers to the target, so the source key is read just outside of it:
+
+```php
+// ... LEFT JOIN LATERAL (
+//   SELECT to_jsonb("employee".*) - ARRAY['passwordHash']::text[] AS "relation_rows"
+//   FROM (SELECT "employee"."managerUUID" AS "key") AS "relation_source"
+//   CROSS JOIN LATERAL (SELECT ... FROM "employee" WHERE "employee"."employeeUUID" = "relation_source"."key" ...) AS "employee"
 // ) AS "manager" ON true ...
 ```
 
