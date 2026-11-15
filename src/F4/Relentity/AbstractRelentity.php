@@ -10,6 +10,7 @@ use F4\DB;
 use F4\DB\{
     AssignmentCollection,
     ConditionCollection,
+    Fragment,
     OrderCollection,
     QueryBuilderInterface,
     SelectExpressionCollection,
@@ -28,8 +29,10 @@ use function
     array_flip,
     array_keys,
     array_is_list,
+    array_map,
     array_reduce,
     array_slice,
+    is_array,
     is_subclass_of
 ;
 
@@ -139,6 +142,18 @@ class AbstractRelentity implements RelentityInterface
         }
         return $relations;
     }
+    /**
+     * A bare * would also expand to the column of every joined relation, which is already selected by the relation itself.
+     */
+    private function qualifyWildcard(array|string|SelectExpressionCollection $columns): array|string|Fragment|SelectExpressionCollection
+    {
+        $wildcard = new Fragment('{#::#}.*', [DB::escapeIdentifier(static::TABLE_NAME)]);
+        return match (true) {
+            $columns === '*' => $wildcard,
+            is_array($columns) => array_map(static fn(mixed $column): mixed => $column === '*' ? $wildcard : $column, $columns),
+            default => $columns,
+        };
+    }
     public function asQuery(
         null|array|string|SelectExpressionCollection $columns = null,
         ?string $returning = null,
@@ -146,8 +161,11 @@ class AbstractRelentity implements RelentityInterface
     {
         switch ($this->actionType) {
             case ActionType::Fetch:
-                $query = DB::select($columns ?: $this->select);
                 $relations = $this->getRelations();
+                $query = DB::select(match ($relations) {
+                    [] => $columns ?: $this->select,
+                    default => $this->qualifyWildcard($columns ?: $this->select),
+                });
                 foreach($relations as $alias => $relation) {
                     $relation->appendSelect($query, $this, $alias);
                 }

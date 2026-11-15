@@ -193,8 +193,8 @@ final class RelentityTest extends TestCase
             ],
             'relation columns are kept' => [
                 static fn(): OwnedFile => OwnedFile::fetch()->selecting(['name']),
-                'SELECT "name", "owner"."relation_value" AS "owner" FROM "file"'
-                    . ' LEFT JOIN LATERAL (SELECT to_jsonb("relation_rows".*) AS "relation_value" FROM'
+                'SELECT "name", "owner"."owner" FROM "file"'
+                    . ' LEFT JOIN LATERAL (SELECT to_jsonb("relation_rows".*) AS "owner" FROM'
                     . ' (SELECT * FROM "user" WHERE "user"."userUUID" = "file"."ownerUUID" LIMIT 1) AS "relation_rows") AS "owner" ON true'
                     . ' LIMIT 100',
             ],

@@ -116,6 +116,8 @@ Employees::fetch()
 - `DEFAULT_SELECT` is `'*'` unless redefined, and accepts anything `select()` does.
   `fetch()` arguments and `selecting()` both replace it, so the columns can be chosen
   at any point of the chain without dropping to `asQuery()`. It only applies to `fetch()`.
+  When relations are joined, `*` is emitted as `"table".*`, so it covers the entity's own
+  columns only and every relation adds exactly one column named after its alias.
 - `DEFAULT_WHERE` also applies to `update()` and `delete()`, so with the definition above
   `Employees::delete()` never touches rows marked as deleted.
 - `DEFAULT_ORDER` is empty unless redefined. Unlike `matching()`, `with()`, `concealing()`

@@ -21,7 +21,6 @@ use F4\Relentity\{
  */
 abstract class AbstractRelation implements RelationInterface {
 
-    protected const string VALUE_ALIAS = 'relation_value';
     protected const string ROWS_ALIAS = 'relation_rows';
 
     /**
@@ -39,9 +38,9 @@ abstract class AbstractRelation implements RelationInterface {
     public function appendSelect(QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface {
         return match ($this->customSelectCallback) {
             null => $query->select(
-                new Fragment('{#::#}.{#::#} AS {#::#}', [
+                // The joined subquery names its only column after the relation alias
+                new Fragment('{#::#}.{#::#}', [
                     $query->escapeIdentifier($alias),
-                    $query->escapeIdentifier(static::VALUE_ALIAS),
                     $query->escapeIdentifier($alias),
                 ])
             ),

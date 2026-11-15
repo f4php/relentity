@@ -48,7 +48,7 @@ abstract class AbstractToOne extends AbstractRelation implements RelationInterfa
                 $alias => DB::select(
                         new Fragment('to_jsonb({#::#}.*) AS {#::#}', [
                             $query->escapeIdentifier(static::ROWS_ALIAS),
-                            $query->escapeIdentifier(static::VALUE_ALIAS),
+                            $query->escapeIdentifier($alias),
                         ])
                     )
                     ->from([static::ROWS_ALIAS => $target->asQuery()]),

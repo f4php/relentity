@@ -22,8 +22,8 @@ final class RelationTest extends TestCase
 {
     private static function lateral(string $alias, string $value, string $rows): string
     {
-        return "SELECT *, \"{$alias}\".\"relation_value\" AS \"{$alias}\" FROM \"file\""
-            . " LEFT JOIN LATERAL (SELECT {$value} AS \"relation_value\" FROM ({$rows}) AS \"relation_rows\") AS \"{$alias}\" ON true"
+        return "SELECT \"file\".*, \"{$alias}\".\"{$alias}\" FROM \"file\""
+            . " LEFT JOIN LATERAL (SELECT {$value} AS \"{$alias}\" FROM ({$rows}) AS \"relation_rows\") AS \"{$alias}\" ON true"
             . ' LIMIT 100';
     }
 
@@ -68,7 +68,7 @@ final class RelationTest extends TestCase
                 'SELECT * FROM "label" WHERE "label"."labelUUID" IN (SELECT "file_label"."labelUUID" FROM "file_label" WHERE "file_label"."fileUUID" = "file"."fileUUID") LIMIT 100')],
             'many-to-many link table name and keys' => ['linkedLabels', self::lateral('linkedLabels', self::LIST,
                 'SELECT * FROM "label" WHERE "label"."labelUUID" IN (SELECT "file_label_link"."labelId" FROM "file_label_link" WHERE "file_label_link"."fileId" = "file"."fileUUID") LIMIT 100')],
-            'custom select and join callbacks' => ['custom', 'SELECT *, \'custom\' AS "custom" FROM "file" LIMIT 100'],
+            'custom select and join callbacks' => ['custom', 'SELECT "file".*, \'custom\' AS "custom" FROM "file" LIMIT 100'],
         ];
     }
 
@@ -76,6 +76,27 @@ final class RelationTest extends TestCase
     public function testRelationSQL(string $alias, string $expected): void
     {
         $this->assertSame($expected, File::fetch()->with($alias)->asSQL());
+    }
+
+    public function testSeveralRelationsHaveDistinctResultColumns(): void
+    {
+        $this->assertSame(
+            'SELECT "file".*, "owner"."owner", "user"."user" FROM "file"'
+                . ' LEFT JOIN LATERAL (SELECT to_jsonb("relation_rows".*) AS "owner" FROM'
+                . ' (SELECT * FROM "user" WHERE "user"."userUUID" = "file"."ownerUUID" LIMIT 1) AS "relation_rows") AS "owner" ON true'
+                . ' LEFT JOIN LATERAL (SELECT to_jsonb("relation_rows".*) AS "user" FROM'
+                . ' (SELECT * FROM "user" WHERE "user"."userUUID" = "file"."userUUID" LIMIT 1) AS "relation_rows") AS "user" ON true'
+                . ' LIMIT 100',
+            File::fetch()->with('owner', 'user')->asSQL(),
+        );
+    }
+
+    public function testWildcardInColumnListIsQualifiedWhenRelationsAreJoined(): void
+    {
+        $this->assertStringStartsWith(
+            'SELECT "file".*, "name", "owner"."owner" FROM "file"',
+            File::fetch(['*', 'name'])->with('owner')->asSQL(),
+        );
     }
 
     public function testDuplicateRelationIsJoinedOnce(): void

@@ -100,11 +100,11 @@ class ManyToMany extends AbstractRelation implements RelationInterface {
             ->leftJoinLateral([
                 $alias => DB::select(match ($this->count) {
                     true => new Fragment('count(*) AS {#::#}', [
-                        $query->escapeIdentifier(static::VALUE_ALIAS),
+                        $query->escapeIdentifier($alias),
                     ]),
                     default => new Fragment('jsonb_agg(to_jsonb({#::#}.*)) AS {#::#}', [
                         $query->escapeIdentifier(static::ROWS_ALIAS),
-                        $query->escapeIdentifier(static::VALUE_ALIAS),
+                        $query->escapeIdentifier($alias),
                     ]),
                 })
                 ->from([static::ROWS_ALIAS => $target->asQuery()]),
