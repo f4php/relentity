@@ -31,16 +31,12 @@ interface RelentityInterface {
     public function execute(): void;
     /** @return list<string> keys and paths that are concealed in the end, defaults included */
     public function getConcealedColumns(): array;
-    /** @return list<string> keys and paths given to concealing() */
-    public function getConcealing(): array;
-    /** @return list<string> keys and paths given to revealing() */
-    public function getRevealing(): array;
     public function limitedTo(?int $rows, ?int $skipping = null): static;
     public function unlimited(): static;
     public function matching(array|ConditionCollection ...$filters): static;
     public function skipping(int $rows): static;
     public function revealing(string|array ...$columns): static;
-    public function selecting(string|array|SelectExpressionCollection $columns): static;
+    public function selecting(string|array|SelectExpressionCollection ...$columns): static;
     public function sortedBy(array|OrderCollection ...$criteria): static;
     public function with(string ...$relations): static;
     public function without(string ...$relations): static;

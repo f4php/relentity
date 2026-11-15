@@ -146,12 +146,12 @@ class AbstractRelentity implements RelentityInterface
     /**
      * A bare * would also expand to the column of every joined relation, which is already selected by the relation itself.
      */
-    private function qualifyWildcard(array|string|SelectExpressionCollection $columns): array|string|Fragment|SelectExpressionCollection
+    private function qualifyWildcard(mixed $columns): mixed
     {
-        $wildcard = new Fragment('{#::#}.*', [DB::escapeIdentifier(static::TABLE_NAME)]);
         return match (true) {
-            $columns === '*' => $wildcard,
-            is_array($columns) => array_map(static fn(mixed $column): mixed => $column === '*' ? $wildcard : $column, $columns),
+            $columns === '*' => new Fragment('{#::#}.*', [DB::escapeIdentifier(static::TABLE_NAME)]),
+            // Arrays nest, e.g. selecting(['*']) stores [['*']]
+            is_array($columns) => array_map($this->qualifyWildcard(...), $columns),
             default => $columns,
         };
     }
@@ -246,20 +246,6 @@ class AbstractRelentity implements RelentityInterface
         return $this;
     }
     /**
-     * @return list<string> keys and paths given to concealing(), DEFAULT_CONCEALING not included
-     */
-    public function getConcealing(): array
-    {
-        return $this->concealing;
-    }
-    /**
-     * @return list<string> keys and paths given to revealing()
-     */
-    public function getRevealing(): array
-    {
-        return $this->revealing;
-    }
-    /**
      * Keys and paths that are concealed in the end. Each of the following overrides the ones before it,
      * whatever the order of the calls: DEFAULT_CONCEALING, revealing(), concealing().
      * A plain key and its single-segment path, e.g. "token" and "$.token", are the same key.
@@ -285,8 +271,9 @@ class AbstractRelentity implements RelentityInterface
      * Replaces the columns given to fetch(), or DEFAULT_SELECT, instead of adding to them.
      * Only applies to fetch().
      */
-    public function selecting(string|array|SelectExpressionCollection $columns): static
+    public function selecting(string|array|SelectExpressionCollection ...$columns): static
     {
+        array_is_list($columns) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
         $this->select = $columns;
         return $this;
     }

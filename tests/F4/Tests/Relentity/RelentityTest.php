@@ -132,12 +132,14 @@ final class RelentityTest extends TestCase
         return [
             'matching' => ['matching', static fn(File $files): File => $files->matching(filters: ['visible' => true])],
             'matching, column-like name' => ['matching', static fn(File $files): File => $files->matching(status: ['a', 'b'])],
-            'matching, after positional' => ['matching', static fn(File $files): File => $files->matching(['visible' => true], filters: ['pinned' => true])],
+            // Called by a dynamic name, as static analysis wrongly reports filters: [...] as overwriting the positional argument
+            'matching, after positional' => ['matching', static fn(File $files): File => $files->{'matching'}(['visible' => true], filters: ['pinned' => true])],
             'sortedBy' => ['sortedBy', static fn(File $files): File => $files->sortedBy(criteria: ['name' => 'asc'])],
             'with' => ['with', static fn(File $files): File => $files->with(relations: 'tags')],
             'without' => ['without', static fn(File $files): File => $files->without(relations: 'tags')],
             'concealing' => ['concealing', static fn(File $files): File => $files->concealing(columns: 'name')],
             'revealing' => ['revealing', static fn(File $files): File => $files->revealing(columns: 'name')],
+            'selecting' => ['selecting', static fn(File $files): File => $files->selecting(columns: 'name')],
         ];
     }
 
@@ -193,7 +195,11 @@ final class RelentityTest extends TestCase
                 static fn(): File => File::fetch()->concealing('$.owner.passwordHash'),
                 ['$.owner.passwordHash'],
             ],
-            'not limited to fetch' => [static fn(): Account => Account::delete()->revealing('token'), ['passwordHash']],
+            'arrays are flattened and repeated keys listed once' => [
+                static fn(): Account => Account::fetch()->concealing('email', ['phone'])->revealing('token')->concealing('email'),
+                ['passwordHash', 'email', 'phone'],
+            ],
+            'not limited to fetch' =>[static fn(): Account => Account::delete()->revealing('token'), ['passwordHash']],
         ];
     }
 
@@ -201,16 +207,6 @@ final class RelentityTest extends TestCase
     public function testConcealedColumns(callable $build, array $expected): void
     {
         $this->assertSame($expected, $build()->getConcealedColumns());
-    }
-
-    public function testConcealingAndRevealingAreReadableWithoutDefaults(): void
-    {
-        $accounts = Account::fetch();
-        $this->assertSame([], $accounts->getConcealing());
-        $this->assertSame([], $accounts->getRevealing());
-        $accounts->concealing('email', ['phone'])->revealing('token')->concealing('email');
-        $this->assertSame(['email', 'phone', 'email'], $accounts->getConcealing());
-        $this->assertSame(['token'], $accounts->getRevealing());
     }
 
     public function testFetchColumns(): void
@@ -229,8 +225,16 @@ final class RelentityTest extends TestCase
                 'SELECT "name", "size" FROM "file" LIMIT 100',
             ],
             'replaces the fetch() columns' => [
-                static fn(): OwnedFile => OwnedFile::fetch(['name'])->without('owner')->selecting(columns: 'size'),
+                static fn(): OwnedFile => OwnedFile::fetch(['name'])->without('owner')->selecting('size'),
                 'SELECT "size" FROM "file" LIMIT 100',
+            ],
+            'accepts several columns as separate arguments' => [
+                static fn(): OwnedFile => OwnedFile::fetch()->without('owner')->selecting('name', 'size'),
+                'SELECT "name", "size" FROM "file" LIMIT 100',
+            ],
+            'accepts strings and arrays together' => [
+                static fn(): OwnedFile => OwnedFile::fetch()->without('owner')->selecting('name', ['size', 'ownerUUID']),
+                'SELECT "name", "size", "ownerUUID" FROM "file" LIMIT 100',
             ],
             'repeated calls replace instead of adding' => [
                 static fn(): OwnedFile => OwnedFile::fetch()->without('owner')->selecting(['name'])->selecting(['size']),
@@ -244,6 +248,20 @@ final class RelentityTest extends TestCase
             'relation columns are kept' => [
                 static fn(): OwnedFile => OwnedFile::fetch()->selecting(['name']),
                 'SELECT "name", "owner"."owner" FROM "file"'
+                    . ' LEFT JOIN LATERAL (SELECT to_jsonb("relation_rows".*) AS "owner" FROM'
+                    . ' (SELECT * FROM "user" WHERE "user"."userUUID" = "file"."ownerUUID" LIMIT 1) AS "relation_rows") AS "owner" ON true'
+                    . ' LIMIT 100',
+            ],
+            'a wildcard argument is qualified when there are relations' => [
+                static fn(): OwnedFile => OwnedFile::fetch()->selecting('*', 'name'),
+                'SELECT "file".*, "name", "owner"."owner" FROM "file"'
+                    . ' LEFT JOIN LATERAL (SELECT to_jsonb("relation_rows".*) AS "owner" FROM'
+                    . ' (SELECT * FROM "user" WHERE "user"."userUUID" = "file"."ownerUUID" LIMIT 1) AS "relation_rows") AS "owner" ON true'
+                    . ' LIMIT 100',
+            ],
+            'a wildcard inside an array argument is qualified when there are relations' => [
+                static fn(): OwnedFile => OwnedFile::fetch()->selecting(['*', 'name']),
+                'SELECT "file".*, "name", "owner"."owner" FROM "file"'
                     . ' LEFT JOIN LATERAL (SELECT to_jsonb("relation_rows".*) AS "owner" FROM'
                     . ' (SELECT * FROM "user" WHERE "user"."userUUID" = "file"."ownerUUID" LIMIT 1) AS "relation_rows") AS "owner" ON true'
                     . ' LIMIT 100',

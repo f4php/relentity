@@ -129,8 +129,7 @@ Employees::fetch()
   removed from every row. Each of the following overrides the ones before it, whatever the
   order of the calls: `DEFAULT_CONCEALING`, `revealing()`, `concealing()`. So `revealing()`
   undoes a default and `concealing()` always wins.
-  `getConcealedColumns()` returns the resulting list, `getConcealing()` and `getRevealing()`
-  return what was passed to `concealing()` and `revealing()`.
+  `getConcealedColumns()` returns the resulting list.
 
 When the entity is the target of a relation, the same defaults apply to the related rows.
 Concealed keys are then removed in SQL, as the related rows are a subquery that is never
