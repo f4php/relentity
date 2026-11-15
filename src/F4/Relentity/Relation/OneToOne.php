@@ -22,8 +22,8 @@ use F4\Relentity\{
 class OneToOne extends AbstractRelation implements RelationInterface {
 
     public function appendJoin(QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface {
-        if ($this->join) {
-            return ($this->join)($query, $source, $alias);
+        if ($this->customJoinCallback) {
+            return ($this->customJoinCallback)($query, $source, $alias);
         }
         // More than one row would duplicate source rows
         $target = $this->target::fetch()->limitedTo(1);

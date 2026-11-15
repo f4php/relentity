@@ -62,7 +62,7 @@ final class RelationTest extends TestCase
                 'SELECT * FROM "label" WHERE "label"."labelUUID" IN (SELECT "file_label"."labelUUID" FROM "file_label" WHERE "file_label"."fileUUID" = "file"."fileUUID") LIMIT 100')],
             'many-to-many link table name and keys' => ['linkedLabels', self::lateral('linkedLabels', self::LIST,
                 'SELECT * FROM "label" WHERE "label"."labelUUID" IN (SELECT "file_label_link"."labelId" FROM "file_label_link" WHERE "file_label_link"."fileId" = "file"."fileUUID") LIMIT 100')],
-            'select and join overrides' => ['custom', 'SELECT *, \'custom\' AS "custom" FROM "file" LIMIT 100'],
+            'custom select and join callbacks' => ['custom', 'SELECT *, \'custom\' AS "custom" FROM "file" LIMIT 100'],
         ];
     }
 

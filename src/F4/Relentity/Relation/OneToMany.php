@@ -31,15 +31,15 @@ class OneToMany extends AbstractRelation implements RelationInterface {
         ?string $targetKey = null,
         ?Closure $modifyTarget = null,
         protected bool $count = false,
-        ?Closure $select = null,
-        ?Closure $join = null,
+        ?Closure $customSelectCallback = null,
+        ?Closure $customJoinCallback = null,
     ) {
-        parent::__construct($target, $sourceKey, $targetKey, $modifyTarget, $select, $join);
+        parent::__construct($target, $sourceKey, $targetKey, $modifyTarget, $customSelectCallback, $customJoinCallback);
     }
 
     public function appendJoin(QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface {
-        if ($this->join) {
-            return ($this->join)($query, $source, $alias);
+        if ($this->customJoinCallback) {
+            return ($this->customJoinCallback)($query, $source, $alias);
         }
         $target = $this->target::fetch();
         if ($this->count) {

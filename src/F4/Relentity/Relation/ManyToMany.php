@@ -42,18 +42,18 @@ class ManyToMany extends AbstractRelation implements RelationInterface {
         ?Closure $modifyTarget = null,
         protected ?Closure $modifyThrough = null,
         protected bool $count = false,
-        ?Closure $select = null,
-        ?Closure $join = null,
+        ?Closure $customSelectCallback = null,
+        ?Closure $customJoinCallback = null,
     ) {
-        parent::__construct($target, $sourceKey, $targetKey, $modifyTarget, $select, $join);
+        parent::__construct($target, $sourceKey, $targetKey, $modifyTarget, $customSelectCallback, $customJoinCallback);
         if ($modifyThrough && !is_subclass_of($through, RelentityInterface::class)) {
             throw new InvalidArgumentException('modifyThrough requires through to be a ' . RelentityInterface::class . ' class');
         }
     }
 
     public function appendJoin(QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface {
-        if ($this->join) {
-            return ($this->join)($query, $source, $alias);
+        if ($this->customJoinCallback) {
+            return ($this->customJoinCallback)($query, $source, $alias);
         }
         $throughIsEntity = is_subclass_of($this->through, RelentityInterface::class);
         $throughTable = match ($throughIsEntity) {

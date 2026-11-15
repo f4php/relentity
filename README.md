@@ -152,8 +152,8 @@ relations need none:
 | `modifyTarget` | `null` | `null` | `null` | `Closure(target): target`, modifies the target query |
 | `modifyThrough` | — | — | `null` | `Closure(through): through`, requires `through` to be a Relentity class |
 | `count` | — | `false` | `false` | return the number of related rows instead of the rows |
-| `select` | `null` | `null` | `null` | `Closure($query, $source, $alias): $query`, replaces the select expression |
-| `join` | `null` | `null` | `null` | `Closure($query, $source, $alias): $query`, replaces the join |
+| `customSelectCallback` | `null` | `null` | `null` | last resort: `Closure($query, $source, $alias): $query`, replaces the select expression |
+| `customJoinCallback` | `null` | `null` | `null` | last resort: `Closure($query, $source, $alias): $query`, replaces the join |
 
 #### Modifying the target
 
@@ -213,7 +213,7 @@ A link table declared as a Relentity class applies its own `DEFAULT_WHERE`, and
 
 For anything the options can't express, write a relation class implementing
 `RelationInterface` (extending `AbstractRelation` gives you the defaults) and use it in
-position 1 with its own named options. As a last resort, `select` and `join` replace the
+position 1 with its own named options. As a last resort, `customSelectCallback` and `customJoinCallback` replace the
 generated SQL of a single relation.
 
 ### Fetching the data

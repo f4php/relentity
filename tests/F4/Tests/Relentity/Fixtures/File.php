@@ -55,10 +55,10 @@ class File extends AbstractRelentity implements RelentityInterface
             'throughTargetKey' => 'labelId',
         ],
         'custom' => [Label::class, OneToMany::class,
-            'select' => static function (QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface {
+            'customSelectCallback' => static function (QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface {
                 return $query->select(new Fragment("'custom' AS {#::#}", [$query->escapeIdentifier($alias)]));
             },
-            'join' => static function (QueryBuilderInterface $query): QueryBuilderInterface {
+            'customJoinCallback' => static function (QueryBuilderInterface $query): QueryBuilderInterface {
                 return $query;
             },
         ],

@@ -32,12 +32,12 @@ abstract class AbstractRelation implements RelationInterface {
         protected ?string $sourceKey = null,
         protected ?string $targetKey = null,
         protected ?Closure $modifyTarget = null,
-        protected ?Closure $select = null,
-        protected ?Closure $join = null,
+        protected ?Closure $customSelectCallback = null,
+        protected ?Closure $customJoinCallback = null,
     ) {}
 
     public function appendSelect(QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface {
-        return match ($this->select) {
+        return match ($this->customSelectCallback) {
             null => $query->select(
                 new Fragment('{#::#}.{#::#} AS {#::#}', [
                     $query->escapeIdentifier($alias),
@@ -45,7 +45,7 @@ abstract class AbstractRelation implements RelationInterface {
                     $query->escapeIdentifier($alias),
                 ])
             ),
-            default => ($this->select)($query, $source, $alias),
+            default => ($this->customSelectCallback)($query, $source, $alias),
         };
     }
 
