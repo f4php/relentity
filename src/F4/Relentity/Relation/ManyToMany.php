@@ -102,8 +102,8 @@ class ManyToMany extends AbstractRelation implements RelationInterface {
                     true => new Fragment('count(*) AS {#::#}', [
                         $query->escapeIdentifier($alias),
                     ]),
-                    default => new Fragment('jsonb_agg(to_jsonb({#::#}.*)) AS {#::#}', [
-                        $query->escapeIdentifier(static::ROWS_ALIAS),
+                    default => new Fragment('jsonb_agg({#::#}) AS {#::#}', [
+                        $this->rowsAsJsonb($query, $target),
                         $query->escapeIdentifier($alias),
                     ]),
                 })

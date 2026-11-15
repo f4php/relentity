@@ -9,11 +9,16 @@ use Closure;
 use F4\DB\{
     Fragment,
     QueryBuilderInterface,
+    Concealment\ConcealmentPath,
 };
 use F4\Relentity\{
     RelentityInterface,
     Relation\RelationInterface,
 };
+
+use function
+    count
+;
 
 /**
  * Constructor arguments are the options of a RELATIONS entry. Subclasses that add
@@ -46,6 +51,37 @@ abstract class AbstractRelation implements RelationInterface {
             ),
             default => ($this->customSelectCallback)($query, $source, $alias),
         };
+    }
+
+    /**
+     * Related rows as JSON objects, without the keys the target conceals: the target is only
+     * a subquery here, so concealment the query builder applies to executed queries never reaches it.
+     * Must be called once the target is final, i.e. after modifyTarget.
+     */
+    protected function rowsAsJsonb(QueryBuilderInterface $query, RelentityInterface $target): Fragment {
+        $keys = [];
+        $paths = [];
+        foreach ($target->getConcealedColumns() as $column) {
+            $segments = ConcealmentPath::fromString($column)->getSegments();
+            if (count($segments) === 1) {
+                $keys[] = $segments[0];
+            } else {
+                $paths[] = $segments;
+            }
+        }
+        $expression = 'to_jsonb({#::#}.*)';
+        $parameters = [$query->escapeIdentifier(static::ROWS_ALIAS)];
+        // The casts are required, bound parameters alone would leave the operators ambiguous
+        if ($keys) {
+            $expression .= ' - ARRAY[{#,...#}]::text[]';
+            $parameters[] = $keys;
+        }
+        // Unlike a key, a path does not descend into JSON lists
+        foreach ($paths as $segments) {
+            $expression .= ' #- ARRAY[{#,...#}]::text[]';
+            $parameters[] = $segments;
+        }
+        return new Fragment($expression, $parameters);
     }
 
     abstract public function appendJoin(QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface;

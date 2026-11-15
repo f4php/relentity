@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 use F4\Tests\Relentity\Fixtures\{
+    Account,
     File,
     FileAttribute,
     FileTag,
@@ -161,6 +162,55 @@ final class RelentityTest extends TestCase
                 ->revealing(...['token'])
                 ->asSQL(),
         );
+    }
+
+    public static function concealedColumnsProvider(): array
+    {
+        return [
+            'nothing by default' => [static fn(): File => File::fetch(), []],
+            'DEFAULT_CONCEALING' => [static fn(): Account => Account::fetch(), ['passwordHash', 'token']],
+            'revealing overrides DEFAULT_CONCEALING' => [
+                static fn(): Account => Account::fetch()->revealing('passwordHash'),
+                ['token'],
+            ],
+            'concealing adds to DEFAULT_CONCEALING' => [
+                static fn(): Account => Account::fetch()->concealing('email'),
+                ['passwordHash', 'token', 'email'],
+            ],
+            'concealing overrides an earlier revealing' => [
+                static fn(): Account => Account::fetch()->revealing('token', 'email')->concealing('email'),
+                ['passwordHash', 'email'],
+            ],
+            'concealing overrides a later revealing' => [
+                static fn(): Account => Account::fetch()->concealing('email')->revealing('email', 'token'),
+                ['passwordHash', 'email'],
+            ],
+            'a key and its single-segment path are the same' => [
+                static fn(): Account => Account::fetch()->revealing('$.passwordHash')->concealing('$.token'),
+                ['$.token'],
+            ],
+            'paths are kept as given' => [
+                static fn(): File => File::fetch()->concealing('$.owner.passwordHash'),
+                ['$.owner.passwordHash'],
+            ],
+            'not limited to fetch' => [static fn(): Account => Account::delete()->revealing('token'), ['passwordHash']],
+        ];
+    }
+
+    #[DataProvider('concealedColumnsProvider')]
+    public function testConcealedColumns(callable $build, array $expected): void
+    {
+        $this->assertSame($expected, $build()->getConcealedColumns());
+    }
+
+    public function testConcealingAndRevealingAreReadableWithoutDefaults(): void
+    {
+        $accounts = Account::fetch();
+        $this->assertSame([], $accounts->getConcealing());
+        $this->assertSame([], $accounts->getRevealing());
+        $accounts->concealing('email', ['phone'])->revealing('token')->concealing('email');
+        $this->assertSame(['email', 'phone', 'email'], $accounts->getConcealing());
+        $this->assertSame(['token'], $accounts->getRevealing());
     }
 
     public function testFetchColumns(): void

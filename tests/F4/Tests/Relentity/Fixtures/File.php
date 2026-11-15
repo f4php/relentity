@@ -58,6 +58,26 @@ class File extends AbstractRelentity implements RelentityInterface
             'throughSourceKey' => 'fileId',
             'throughTargetKey' => 'labelId',
         ],
+        'account' => [Account::class, ManyToOne::class],
+        'accountProfile' => [Account::class, OneToOne::class],
+        'accounts' => [Account::class, OneToMany::class],
+        'linkedAccounts' => [Account::class, ManyToMany::class, 'through' => 'file_account'],
+        'accountCount' => [Account::class, OneToMany::class, 'count' => true],
+        'revealedAccount' => [Account::class, ManyToOne::class,
+            'modifyTarget' => static function (Account $accounts): Account {
+                return $accounts->revealing('passwordHash', 'token');
+            },
+        ],
+        'partlyRevealedAccount' => [Account::class, ManyToOne::class,
+            'modifyTarget' => static function (Account $accounts): Account {
+                return $accounts->revealing('token')->concealing('email');
+            },
+        ],
+        'deepConcealedAccount' => [Account::class, ManyToOne::class,
+            'modifyTarget' => static function (Account $accounts): Account {
+                return $accounts->concealing('$.settings.secret', '$.settings["api.key"]');
+            },
+        ],
         'custom' => [Label::class, OneToMany::class,
             'customSelectCallback' => static function (QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface {
                 return $query->select(new Fragment("'custom' AS {#::#}", [$query->escapeIdentifier($alias)]));

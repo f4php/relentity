@@ -29,6 +29,12 @@ interface RelentityInterface {
     public function asValue(string|int $column = 0): mixed;
     public function concealing(string|array ...$columns): static;
     public function execute(): void;
+    /** @return list<string> keys and paths that are concealed in the end, defaults included */
+    public function getConcealedColumns(): array;
+    /** @return list<string> keys and paths given to concealing() */
+    public function getConcealing(): array;
+    /** @return list<string> keys and paths given to revealing() */
+    public function getRevealing(): array;
     public function limitedTo(?int $rows, ?int $skipping = null): static;
     public function unlimited(): static;
     public function matching(array|ConditionCollection ...$filters): static;

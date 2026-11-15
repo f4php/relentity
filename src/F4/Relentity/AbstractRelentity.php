@@ -15,6 +15,7 @@ use F4\DB\{
     QueryBuilderInterface,
     SelectExpressionCollection,
     Adapter\AdapterInterface,
+    Concealment\ConcealmentPath,
 };
 use F4\Relentity\{
     ActionType,
@@ -32,6 +33,7 @@ use function
     array_map,
     array_reduce,
     array_slice,
+    array_values,
     is_array,
     is_subclass_of
 ;
@@ -46,7 +48,6 @@ class AbstractRelentity implements RelentityInterface
     public const string|array DEFAULT_SELECT = '*';
     public const array DEFAULT_WHERE = [];
     public const array DEFAULT_CONCEALING = [];
-    public const array DEFAULT_REVEALING = [];
     public const array DEFAULT_ORDER = [];
     public const ?string DEFAULT_RETURNING = '*';
     public const array DEFAULT_RELATIONS = [];
@@ -57,7 +58,9 @@ class AbstractRelentity implements RelentityInterface
     private string|array $insert = [];
     private string|array|AssignmentCollection $update = [];
     private array $where = [];
+    /** @var list<string> keys and paths given to concealing(), DEFAULT_CONCEALING not included */
     private array $concealing = [];
+    /** @var list<string> keys and paths given to revealing() */
     private array $revealing = [];
     private array|OrderCollection $order = [];
     private ?string $returning = null;
@@ -92,8 +95,6 @@ class AbstractRelentity implements RelentityInterface
                 break;
         }
         $this->where = static::DEFAULT_WHERE;
-        $this->concealing = static::DEFAULT_CONCEALING;
-        $this->revealing = static::DEFAULT_REVEALING;
         $this->order = static::DEFAULT_ORDER;
         $this->limit = static::DEFAULT_LIMIT;
         $this->returning = static::DEFAULT_RETURNING;
@@ -203,10 +204,9 @@ class AbstractRelentity implements RelentityInterface
         if($this->actionType !== ActionType::Fetch && ($returning ?? $this->returning)) {
             $query->returning($returning ?? $this->returning);
         }
-        $query
-            ->revealing($this->revealing)
-            ->concealing($this->concealing)
-        ;
+        // Only takes effect when this query is executed itself: as the target of a relation
+        // the same list is applied in SQL by the relation, see AbstractRelation::rowsAsJsonb()
+        $query->concealing($this->getConcealedColumns());
         return $query;
     }
     public function asRow(): ?array
@@ -244,6 +244,42 @@ class AbstractRelentity implements RelentityInterface
             initial: $this->revealing,
         );
         return $this;
+    }
+    /**
+     * @return list<string> keys and paths given to concealing(), DEFAULT_CONCEALING not included
+     */
+    public function getConcealing(): array
+    {
+        return $this->concealing;
+    }
+    /**
+     * @return list<string> keys and paths given to revealing()
+     */
+    public function getRevealing(): array
+    {
+        return $this->revealing;
+    }
+    /**
+     * Keys and paths that are concealed in the end. Each of the following overrides the ones before it,
+     * whatever the order of the calls: DEFAULT_CONCEALING, revealing(), concealing().
+     * A plain key and its single-segment path, e.g. "token" and "$.token", are the same key.
+     *
+     * @return list<string>
+     */
+    public function getConcealedColumns(): array
+    {
+        $canonical = static fn(string $column): string => ConcealmentPath::fromString($column)->getCanonical();
+        $concealed = [];
+        foreach (static::DEFAULT_CONCEALING as $column) {
+            $concealed[$canonical($column)] = $column;
+        }
+        foreach ($this->revealing as $column) {
+            unset($concealed[$canonical($column)]);
+        }
+        foreach ($this->concealing as $column) {
+            $concealed[$canonical($column)] = $column;
+        }
+        return array_values($concealed);
     }
     /**
      * Replaces the columns given to fetch(), or DEFAULT_SELECT, instead of adding to them.

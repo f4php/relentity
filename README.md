@@ -61,7 +61,6 @@ class Employees extends AbstractRelentity implements RelentityInterface {
   public const array DEFAULT_WHERE = ['deleted' => false];     // applied to every statement
   public const ?int DEFAULT_LIMIT = 50;                        // instead of 100, null for no limit
   public const array DEFAULT_CONCEALING = ['passwordHash'];    // columns hidden unless revealed
-  public const array DEFAULT_REVEALING = [];
   public const array DEFAULT_ORDER = ['name' => 'asc'];
   public const array DEFAULT_RELATIONS = ['contractor'];       // joined unless a query opts out
 
@@ -126,7 +125,30 @@ Employees::fetch()
 - `DEFAULT_LIMIT` is `100` unless redefined, set it to `null` for entities that should be
   fetched without a limit. It only applies to `fetch()`.
 
+- `DEFAULT_CONCEALING` lists result keys, or paths such as `$.settings.secret`, that are
+  removed from every row. Each of the following overrides the ones before it, whatever the
+  order of the calls: `DEFAULT_CONCEALING`, `revealing()`, `concealing()`. So `revealing()`
+  undoes a default and `concealing()` always wins.
+  `getConcealedColumns()` returns the resulting list, `getConcealing()` and `getRevealing()`
+  return what was passed to `concealing()` and `revealing()`.
+
 When the entity is the target of a relation, the same defaults apply to the related rows.
+Concealed keys are then removed in SQL, as the related rows are a subquery that is never
+executed on its own:
+
+```php
+Employees::fetch()->with('manager')->asSQL();
+// SELECT ..., "manager"."manager" FROM "employee" LEFT JOIN LATERAL (
+//   SELECT to_jsonb("relation_rows".*) - ARRAY['passwordHash']::text[] AS "manager" FROM (...) AS "relation_rows"
+// ) AS "manager" ON true ...
+```
+
+Use `modifyTarget` to conceal or reveal keys for a single relation. Two things to keep in mind:
+
+- A path is removed with `#-`, which does not descend into JSON lists. To hide keys of a
+  nested to-many relation, conceal them on the entity that is its target instead.
+- A key removed this way is absent from the result, so with `DB_STRICT_CONCEAL` enabled the
+  source must not conceal it again, e.g. as `$.manager.passwordHash`.
 
 ### Declaring relations
 

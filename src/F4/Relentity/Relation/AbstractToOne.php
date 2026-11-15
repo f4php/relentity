@@ -46,8 +46,8 @@ abstract class AbstractToOne extends AbstractRelation implements RelationInterfa
         return $query
             ->leftJoinLateral([
                 $alias => DB::select(
-                        new Fragment('to_jsonb({#::#}.*) AS {#::#}', [
-                            $query->escapeIdentifier(static::ROWS_ALIAS),
+                        new Fragment('{#::#} AS {#::#}', [
+                            $this->rowsAsJsonb($query, $target),
                             $query->escapeIdentifier($alias),
                         ])
                     )

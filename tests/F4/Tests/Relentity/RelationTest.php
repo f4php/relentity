@@ -28,6 +28,8 @@ final class RelationTest extends TestCase
     }
 
     private const string LIST = 'jsonb_agg(to_jsonb("relation_rows".*))';
+    private const string CONCEALED = 'to_jsonb("relation_rows".*) - ARRAY[\'passwordHash\',\'token\']::text[]';
+    private const string ACCOUNT_LINK = '"account"."accountUUID" = "file"."accountUUID"';
     private const string ATTRIBUTES_LINK = '"attribute"."fileUUID" = "file"."fileUUID"';
     private const string TAGS_THROUGH = 'SELECT "file_tag"."tagUUID" FROM "file_tag" WHERE "deleted" = FALSE';
 
@@ -68,6 +70,24 @@ final class RelationTest extends TestCase
                 'SELECT * FROM "label" WHERE "label"."labelUUID" IN (SELECT "file_label"."labelUUID" FROM "file_label" WHERE "file_label"."fileUUID" = "file"."fileUUID") LIMIT 100')],
             'many-to-many link table name and keys' => ['linkedLabels', self::lateral('linkedLabels', self::LIST,
                 'SELECT * FROM "label" WHERE "label"."labelUUID" IN (SELECT "file_label_link"."labelId" FROM "file_label_link" WHERE "file_label_link"."fileId" = "file"."fileUUID") LIMIT 100')],
+            'many-to-one conceals target defaults' => ['account', self::lateral('account', self::CONCEALED,
+                'SELECT * FROM "account" WHERE ' . self::ACCOUNT_LINK . ' LIMIT 1')],
+            'one-to-one conceals target defaults' => ['accountProfile', self::lateral('accountProfile', self::CONCEALED,
+                'SELECT * FROM "account" WHERE "account"."fileUUID" = "file"."fileUUID" LIMIT 1')],
+            'one-to-many conceals target defaults' => ['accounts', self::lateral('accounts', 'jsonb_agg(' . self::CONCEALED . ')',
+                'SELECT * FROM "account" WHERE "account"."fileUUID" = "file"."fileUUID" LIMIT 100')],
+            'many-to-many conceals target defaults' => ['linkedAccounts', self::lateral('linkedAccounts', 'jsonb_agg(' . self::CONCEALED . ')',
+                'SELECT * FROM "account" WHERE "account"."accountUUID" IN (SELECT "file_account"."accountUUID" FROM "file_account" WHERE "file_account"."fileUUID" = "file"."fileUUID") LIMIT 100')],
+            'count has nothing to conceal' => ['accountCount', self::lateral('accountCount', 'count(*)',
+                'SELECT * FROM "account" WHERE "account"."fileUUID" = "file"."fileUUID"')],
+            'modifyTarget reveals all target defaults' => ['revealedAccount', self::lateral('revealedAccount', 'to_jsonb("relation_rows".*)',
+                'SELECT * FROM "account" WHERE ' . self::ACCOUNT_LINK . ' LIMIT 1')],
+            'modifyTarget reveals and conceals' => ['partlyRevealedAccount', self::lateral('partlyRevealedAccount',
+                'to_jsonb("relation_rows".*) - ARRAY[\'passwordHash\',\'email\']::text[]',
+                'SELECT * FROM "account" WHERE ' . self::ACCOUNT_LINK . ' LIMIT 1')],
+            'paths are concealed one by one' => ['deepConcealedAccount', self::lateral('deepConcealedAccount',
+                self::CONCEALED . ' #- ARRAY[\'settings\',\'secret\']::text[] #- ARRAY[\'settings\',\'api.key\']::text[]',
+                'SELECT * FROM "account" WHERE ' . self::ACCOUNT_LINK . ' LIMIT 1')],
             'custom select and join callbacks' => ['custom', 'SELECT "file".*, \'custom\' AS "custom" FROM "file" LIMIT 100'],
         ];
     }
