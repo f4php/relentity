@@ -90,6 +90,46 @@ class Employees extends AbstractRelentity implements RelentityInterface {
 };
 ```
 
+### Method reference
+
+Every statement starts with one of four static methods. All of them return the entity, so the
+methods below can be chained.
+
+| Method | Description |
+|---|---|
+| `fetch($columns = null)` | starts a `SELECT`; `$columns` replace `DEFAULT_SELECT` |
+| `insert(array $values)` | starts an `INSERT` of `$values` |
+| `update(array $changes)` | starts an `UPDATE` setting `$changes` |
+| `delete()` | starts a `DELETE` |
+
+The following methods shape the statement and return the entity:
+
+| Method | Applies to | Description |
+|---|---|---|
+| `matching(...$filters)` | fetch, update, delete | adds conditions to `DEFAULT_WHERE` and to earlier calls |
+| `selecting(...$columns)` | fetch | replaces the columns given to `fetch()` or `DEFAULT_SELECT` |
+| `sortedBy(...$criteria)` | fetch | replaces the ordering, `DEFAULT_ORDER` included; removes it without arguments |
+| `limitedTo(?int $rows, ?int $skipping = null)` | fetch | replaces `DEFAULT_LIMIT`, `null` removes the limit; optionally sets the offset |
+| `unlimited()` | fetch | removes the limit, same as `limitedTo(null)` |
+| `skipping(int $rows)` | fetch | sets the offset |
+| `with(...$relations)` | fetch | joins relations by alias, in addition to `DEFAULT_RELATIONS` |
+| `without(...$relations)` | fetch | omits relations by alias, default ones included |
+| `concealing(...$columns)` | all | hides result keys or paths, in addition to `DEFAULT_CONCEALING` |
+| `revealing(...$columns)` | all | shows keys or paths concealed by default; `concealing()` still wins |
+
+The following methods end the chain:
+
+| Method | Returns | Description |
+|---|---|---|
+| `asTable()` | `array` | executes the statement and returns all rows |
+| `asRow()` | `?array` | executes the statement and returns the first row |
+| `asValue(string\|int $column = 0)` | `mixed` | executes the statement and returns a single value of the first row |
+| `asCount()` | `int` | executes a `COUNT(*)` of the matching rows, ignoring relations, ordering, limit and offset |
+| `execute()` | `void` | executes the statement and discards the result |
+| `asQuery($columns = null, ?string $returning = null)` | `QueryBuilderInterface` | builds the statement without executing it; `$columns` override the selected ones, `$returning` overrides `DEFAULT_RETURNING` |
+| `asSQL()` | `string` | builds the statement and returns its SQL without executing it |
+| `getConcealedColumns()` | `list<string>` | keys and paths that are concealed in the end, defaults included |
+
 ### Query defaults
 
 `DEFAULT_SELECT`, `DEFAULT_WHERE`, `DEFAULT_ORDER` and `DEFAULT_LIMIT` shape every statement
