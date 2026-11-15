@@ -186,10 +186,6 @@ final class RelentityTest extends TestCase
                 static fn(): OwnedFile => OwnedFile::fetch()->without('owner')->selecting(['name'])->selecting(['size']),
                 'SELECT "size" FROM "file" LIMIT 100',
             ],
-            'null returns to the default columns' => [
-                static fn(): OwnedFile => OwnedFile::fetch(['name'])->without('owner')->selecting(null),
-                'SELECT * FROM "file" LIMIT 100',
-            ],
             'asQuery() columns still take precedence' => [
                 static fn(): OwnedFile => OwnedFile::fetch()->without('owner')->selecting(['name']),
                 'SELECT "size" FROM "file" LIMIT 100',

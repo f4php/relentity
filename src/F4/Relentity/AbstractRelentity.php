@@ -61,7 +61,8 @@ class AbstractRelentity implements RelentityInterface
     private ?int $limit = null;
     private int $offset = 0;
     /**
-     * Active relations as complete declarations, copied from RELATIONS and keyed by alias
+     * Active relations keyed by alias, as complete declarations copied from RELATIONS:
+     * [TargetClass::class, RelationClass::class, 'option' => value, ...]
      *
      * @var array<string, array>
      */
@@ -122,8 +123,7 @@ class AbstractRelentity implements RelentityInterface
         $relations = [];
         foreach ($this->relations as $alias => $declaration) {
             $location = static::class . "::RELATIONS['{$alias}']";
-            $target = $declaration[0] ?? null;
-            $relationType = $declaration[1] ?? OneToMany::class;
+            [$target, $relationType] = $declaration;
             if (!is_subclass_of($target, RelentityInterface::class)) {
                 throw new InvalidArgumentException("Position 0 of {$location} must be a " . RelentityInterface::class . ' class');
             }
@@ -229,7 +229,7 @@ class AbstractRelentity implements RelentityInterface
     }
     /**
      * Replaces the columns given to fetch(), or DEFAULT_SELECT, instead of adding to them.
-     * Pass null to return to DEFAULT_SELECT. Only applies to fetch().
+     * Only applies to fetch().
      */
     public function selecting(string|array|SelectExpressionCollection $columns): static
     {
@@ -290,8 +290,17 @@ class AbstractRelentity implements RelentityInterface
     {
         array_is_list($relations) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
         foreach ($relations as $alias) {
-            $this->relations[$alias] ??= (array) (static::RELATIONS[$alias]
+            if (isset($this->relations[$alias])) {
+                continue;
+            }
+            $declaration = (array) (static::RELATIONS[$alias]
                 ?? throw new InvalidArgumentException('Unknown relation ' . static::class . "::RELATIONS['{$alias}']"));
+            // Target and relation class always take positions 0 and 1, so that options follow them
+            $this->relations[$alias] = [
+                $declaration[0] ?? null,
+                $declaration[1] ?? OneToMany::class,
+                ...array_diff_key($declaration, [0 => true, 1 => true]),
+            ];
         }
         return $this;
     }

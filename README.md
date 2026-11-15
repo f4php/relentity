@@ -98,7 +98,7 @@ Employees::fetch();
 // SELECT "employeeUUID", "name", "email", "passwordHash" FROM "employee" WHERE "deleted" = FALSE ORDER BY "name" ASC LIMIT 50
 
 Employees::fetch('*')                     // fetch() arguments replace DEFAULT_SELECT
-  ->selecting(['name', 'email'])          // selecting() replaces them again, selecting(null) restores DEFAULT_SELECT
+  ->selecting(['name', 'email'])          // selecting() replaces them again
   ->matching(['enabled' => true])         // matching() adds to DEFAULT_WHERE
   ->sortedBy(['email' => 'asc'])          // sortedBy() replaces DEFAULT_ORDER
   ->limitedTo(10);                        // limitedTo() replaces DEFAULT_LIMIT

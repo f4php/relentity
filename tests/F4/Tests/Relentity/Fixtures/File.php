@@ -37,6 +37,8 @@ class File extends AbstractRelentity implements RelentityInterface
             },
         ],
         'attributeCount' => [FileAttribute::class, OneToMany::class, 'count' => true],
+        'attributeCountDefaultType' => [FileAttribute::class, 'count' => true],
+        'ownedAttributesDefaultType' => [FileAttribute::class, 'sourceKey' => 'ownerUUID', 'targetKey' => 'ownerUUID'],
         'owner' => [User::class, OneToOne::class, 'sourceKey' => 'ownerUUID', 'targetKey' => 'userUUID'],
         'tags' => [Tag::class, ManyToMany::class, 'through' => FileTag::class],
         'activeTags' => [Tag::class, ManyToMany::class,
