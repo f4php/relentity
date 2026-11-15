@@ -10,7 +10,8 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "F4\\": "tests/F4"
+            "F4\\": "tests/F4",
+            "F4\\PHPStan\\": "vendor/f4php/db/tests/F4/PhpStan"
         }
     },
     "authors": [

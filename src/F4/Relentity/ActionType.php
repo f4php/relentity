@@ -6,7 +6,7 @@ namespace F4\Relentity;
 
 enum ActionType {
     case Fetch;
-    case Insert;
-    case Update;
-    case Delete;
+    case Add;
+    case Change;
+    case Remove;
 }

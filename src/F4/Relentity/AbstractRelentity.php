@@ -8,7 +8,6 @@ use Error;
 use InvalidArgumentException;
 use F4\DB;
 use F4\DB\{
-    AssignmentCollection,
     ConditionCollection,
     Fragment,
     OrderCollection,
@@ -55,14 +54,14 @@ class AbstractRelentity implements RelentityInterface
     public const ?AdapterInterface DEFAULT_ADAPTER = null;
 
     private string|array|SelectExpressionCollection $select = [];
-    private string|array $insert = [];
-    private string|array|AssignmentCollection $update = [];
+    private array $values = [];
+    private array $changes = [];
     private array $where = [];
     /** @var list<string> keys and paths given to concealing(), DEFAULT_CONCEALING not included */
     private array $concealing = [];
     /** @var list<string> keys and paths given to revealing() */
     private array $revealing = [];
-    private array|OrderCollection $order = [];
+    private array $order = [];
     private ?string $returning = null;
     private ?int $limit = null;
     private int $offset = 0;
@@ -87,11 +86,11 @@ class AbstractRelentity implements RelentityInterface
             case ActionType::Fetch:
                 $this->select = $parameters ?? static::DEFAULT_SELECT;
                 break;
-            case ActionType::Insert:
-                $this->insert = ((array)$parameters) or throw new InvalidArgumentException("Missing data for insert action");
+            case ActionType::Add:
+                $this->values = ((array)$parameters) or throw new InvalidArgumentException("Missing data for add action");
                 break;
-            case ActionType::Update:
-                $this->update = ((array)$parameters) or throw new InvalidArgumentException("Missing data for update action");;
+            case ActionType::Change:
+                $this->changes = ((array)$parameters) or throw new InvalidArgumentException("Missing data for change action");
                 break;
         }
         $this->where = static::DEFAULT_WHERE;
@@ -105,17 +104,17 @@ class AbstractRelentity implements RelentityInterface
     {
         return new static(ActionType::Fetch, $columns);
     }
-    public static function update(array $changes): static
+    public static function change(array $changes): static
     {
-        return new static(ActionType::Update, $changes);
+        return new static(ActionType::Change, $changes);
     }
-    public static function insert(array $values): static
+    public static function add(array $values): static
     {
-        return new static(ActionType::Insert, $values);
+        return new static(ActionType::Add, $values);
     }
-    public static function delete(): static
+    public static function remove(): static
     {
-        return new static(ActionType::Delete);
+        return new static(ActionType::Remove);
     }
     /**
      * A RELATIONS entry is either a target class, or [TargetClass::class, RelationClass::class, 'option' => value, ...],
@@ -175,13 +174,13 @@ class AbstractRelentity implements RelentityInterface
                     $relation->appendJoin($query, $this, $alias);
                 }
                 break;
-            case ActionType::Update:
-                $query = DB::update(static::TABLE_NAME)->set($this->update);
+            case ActionType::Change:
+                $query = DB::update(static::TABLE_NAME)->set($this->changes);
                 break;
-            case ActionType::Insert:
-                $query = DB::insert()->into(static::TABLE_NAME)->values($this->insert);
+            case ActionType::Add:
+                $query = DB::insert()->into(static::TABLE_NAME)->values($this->values);
                 break;
-            case ActionType::Delete:
+            case ActionType::Remove:
                 $query = DB::delete()->from(static::TABLE_NAME);
                 break;
             default: throw new InvalidArgumentException('Uknown entity action');
@@ -189,7 +188,7 @@ class AbstractRelentity implements RelentityInterface
         if ($this->adapter) {
             $query->useAdapter($this->adapter);
         }
-        if ($this->actionType !== ActionType::Insert && $this->where) {
+        if ($this->actionType !== ActionType::Add && $this->where) {
             $query->where($this->where);
         }
         if ($this->actionType === ActionType::Fetch && $this->order) {

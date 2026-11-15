@@ -8,12 +8,10 @@ use Composer\Pcre\Preg;
 use DateTimeInterface;
 use F4\DB\Adapter\AdapterInterface;
 use F4\DB\PreparedStatement;
-use InvalidArgumentException;
 
 use function is_bool;
 use function is_float;
 use function is_int;
-use function is_scalar;
 use function sprintf;
 
 final class MockAdapter implements AdapterInterface
@@ -47,10 +45,8 @@ final class MockAdapter implements AdapterInterface
                             true => (string) $value,
                             default => match ($value instanceof DateTimeInterface) {
                                     true => sprintf("'%s'", $value->format('Y-m-d\TH:i:s.uP')),
-                                    default => match (is_scalar($value)) {
-                                            true => sprintf("'%s'", Preg::replace(pattern: "/'/u", replacement: "''", subject: $value)),
-                                            default => throw new InvalidArgumentException('Unsupported parameter type')
-                                        }
+                                    // Only a string is left of the types the interface accepts
+                                    default => sprintf("'%s'", Preg::replace(pattern: "/'/u", replacement: "''", subject: $value)),
                                 }
                         }
                 }

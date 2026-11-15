@@ -98,15 +98,15 @@ methods below can be chained.
 | Method | Description |
 |---|---|
 | `fetch($columns = null)` | starts a `SELECT`; `$columns` replace `DEFAULT_SELECT` |
-| `insert(array $values)` | starts an `INSERT` of `$values` |
-| `update(array $changes)` | starts an `UPDATE` setting `$changes` |
-| `delete()` | starts a `DELETE` |
+| `add(array $values)` | starts an `INSERT` of `$values` |
+| `change(array $changes)` | starts an `UPDATE` setting `$changes` |
+| `remove()` | starts a `DELETE` |
 
 The following methods shape the statement and return the entity:
 
 | Method | Applies to | Description |
 |---|---|---|
-| `matching(...$filters)` | fetch, update, delete | adds conditions to `DEFAULT_WHERE` and to earlier calls |
+| `matching(...$filters)` | fetch, change, remove | adds conditions to `DEFAULT_WHERE` and to earlier calls |
 | `selecting(...$columns)` | fetch | replaces the columns given to `fetch()` or `DEFAULT_SELECT` |
 | `sortedBy(...$criteria)` | fetch | replaces the ordering, `DEFAULT_ORDER` included; removes it without arguments |
 | `limitedTo(?int $rows, ?int $skipping = null)` | fetch | replaces `DEFAULT_LIMIT`, `null` removes the limit; optionally sets the offset |
@@ -157,8 +157,8 @@ Employees::fetch()
   at any point of the chain without dropping to `asQuery()`. It only applies to `fetch()`.
   When relations are joined, `*` is emitted as `"table".*`, so it covers the entity's own
   columns only and every relation adds exactly one column named after its alias.
-- `DEFAULT_WHERE` also applies to `update()` and `delete()`, so with the definition above
-  `Employees::delete()` never touches rows marked as deleted.
+- `DEFAULT_WHERE` also applies to `change()` and `remove()`, so with the definition above
+  `Employees::remove()` never touches rows marked as deleted.
 - `DEFAULT_ORDER` is empty unless redefined. Unlike `matching()`, `with()`, `concealing()`
   and `revealing()`, which add to what is already set, `sortedBy()` replaces the ordering,
   so pass all criteria in a single call. It only applies to `fetch()`.

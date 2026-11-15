@@ -83,11 +83,11 @@ final class RelentityTest extends TestCase
         $this->assertSame($expected, $modify(FileAttribute::fetch())->asSQL());
     }
 
-    public function testLimitDoesNotApplyToDelete(): void
+    public function testLimitDoesNotApplyToRemove(): void
     {
         $this->assertSame(
             'DELETE FROM "attribute" WHERE "visible" = FALSE RETURNING *',
-            FileAttribute::delete()->matching(['visible' => false])->limitedTo(5, skipping: 10)->asSQL(),
+            FileAttribute::remove()->matching(['visible' => false])->limitedTo(5, skipping: 10)->asSQL(),
         );
     }
 
@@ -199,7 +199,7 @@ final class RelentityTest extends TestCase
                 static fn(): Account => Account::fetch()->concealing('email', ['phone'])->revealing('token')->concealing('email'),
                 ['passwordHash', 'email', 'phone'],
             ],
-            'not limited to fetch' =>[static fn(): Account => Account::delete()->revealing('token'), ['passwordHash']],
+            'not limited to fetch' =>[static fn(): Account => Account::remove()->revealing('token'), ['passwordHash']],
         ];
     }
 
@@ -275,11 +275,11 @@ final class RelentityTest extends TestCase
         $this->assertSame($expected, $build()->asQuery($asQueryColumns)->asSQL());
     }
 
-    public function testSelectingDoesNotApplyToUpdate(): void
+    public function testSelectingDoesNotApplyToChange(): void
     {
         $this->assertSame(
             'UPDATE "attribute" SET "visible" = TRUE RETURNING *',
-            FileAttribute::update(['visible' => true])->selecting(['name'])->asSQL(),
+            FileAttribute::change(['visible' => true])->selecting(['name'])->asSQL(),
         );
     }
 
@@ -295,11 +295,11 @@ final class RelentityTest extends TestCase
     {
         $this->assertSame(
             'UPDATE "attribute" SET "visible" = TRUE RETURNING *',
-            FileAttribute::update(['visible' => true])->asSQL(),
+            FileAttribute::change(['visible' => true])->asSQL(),
         );
         $this->assertSame(
             'UPDATE "attribute" SET "visible" = TRUE RETURNING "attributeUUID"',
-            FileAttribute::update(['visible' => true])->asQuery(returning: 'attributeUUID')->asSQL(),
+            FileAttribute::change(['visible' => true])->asQuery(returning: 'attributeUUID')->asSQL(),
         );
     }
 }

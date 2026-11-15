@@ -15,9 +15,9 @@ interface RelentityInterface {
     public const string TABLE_NAME = '';
     public const string PRIMARY_KEY = '';
     public static function fetch(null|string|array|SelectExpressionCollection $columns = null): static;
-    public static function insert(array $values): static;
-    public static function update(array $changes): static;
-    public static function delete(): static;
+    public static function add(array $values): static;
+    public static function change(array $changes): static;
+    public static function remove(): static;
     public function asCount(): int;
     public function asQuery(
         null|array|string|SelectExpressionCollection $columns = null,
