@@ -98,10 +98,11 @@ Employees::fetch();
 // SELECT "employeeUUID", "name", "email", "passwordHash" FROM "employee" WHERE "deleted" = FALSE ORDER BY "name" ASC LIMIT 50
 
 Employees::fetch('*')                     // fetch() arguments replace DEFAULT_SELECT
+  ->selecting(['name', 'email'])          // selecting() replaces them again, selecting(null) restores DEFAULT_SELECT
   ->matching(['enabled' => true])         // matching() adds to DEFAULT_WHERE
   ->sortedBy(['email' => 'asc'])          // sortedBy() replaces DEFAULT_ORDER
   ->limitedTo(10);                        // limitedTo() replaces DEFAULT_LIMIT
-// SELECT * FROM "employee" WHERE "deleted" = FALSE AND "enabled" = TRUE ORDER BY "email" ASC LIMIT 10
+// SELECT "name", "email" FROM "employee" WHERE "deleted" = FALSE AND "enabled" = TRUE ORDER BY "email" ASC LIMIT 10
 
 Employees::fetch()
   ->sortedBy()                            // no arguments: removes the ordering
@@ -110,6 +111,8 @@ Employees::fetch()
 ```
 
 - `DEFAULT_SELECT` is `'*'` unless redefined, and accepts anything `select()` does.
+  `fetch()` arguments and `selecting()` both replace it, so the columns can be chosen
+  at any point of the chain without dropping to `asQuery()`. It only applies to `fetch()`.
 - `DEFAULT_WHERE` also applies to `update()` and `delete()`, so with the definition above
   `Employees::delete()` never touches rows marked as deleted.
 - `DEFAULT_ORDER` is empty unless redefined. Unlike `matching()`, `with()`, `concealing()`

@@ -24,12 +24,12 @@ use F4\Relentity\{
 };
 
 use function
-    array_diff,
+    array_diff_key,
+    array_flip,
+    array_keys,
     array_is_list,
     array_reduce,
     array_slice,
-    array_unique,
-    array_values,
     is_subclass_of
 ;
 
@@ -60,6 +60,11 @@ class AbstractRelentity implements RelentityInterface
     private ?string $returning = null;
     private ?int $limit = null;
     private int $offset = 0;
+    /**
+     * Active relations as complete declarations, copied from RELATIONS and keyed by alias
+     *
+     * @var array<string, array>
+     */
     private array $relations = [];
     private ?AdapterInterface $adapter = null;
 
@@ -88,7 +93,7 @@ class AbstractRelentity implements RelentityInterface
         $this->order = static::DEFAULT_ORDER;
         $this->limit = static::DEFAULT_LIMIT;
         $this->returning = static::DEFAULT_RETURNING;
-        $this->relations = static::DEFAULT_RELATIONS;
+        $this->with(...static::DEFAULT_RELATIONS);
         $this->adapter = static::DEFAULT_ADAPTER;
     }
     public static function fetch(null|string|array|SelectExpressionCollection $columns = null): static
@@ -115,9 +120,8 @@ class AbstractRelentity implements RelentityInterface
      */
     protected function getRelations(): array {
         $relations = [];
-        foreach (array_unique($this->relations) as $alias) {
+        foreach ($this->relations as $alias => $declaration) {
             $location = static::class . "::RELATIONS['{$alias}']";
-            $declaration = (array) (static::RELATIONS[$alias] ?? throw new InvalidArgumentException("Unknown relation {$location}"));
             $target = $declaration[0] ?? null;
             $relationType = $declaration[1] ?? OneToMany::class;
             if (!is_subclass_of($target, RelentityInterface::class)) {
@@ -223,6 +227,15 @@ class AbstractRelentity implements RelentityInterface
         );
         return $this;
     }
+    /**
+     * Replaces the columns given to fetch(), or DEFAULT_SELECT, instead of adding to them.
+     * Pass null to return to DEFAULT_SELECT. Only applies to fetch().
+     */
+    public function selecting(string|array|SelectExpressionCollection $columns): static
+    {
+        $this->select = $columns;
+        return $this;
+    }
     public function unlimited(): static
     {
         $this->limit = null;
@@ -248,7 +261,7 @@ class AbstractRelentity implements RelentityInterface
     public function asCount(): int
     {
         return (clone $this)
-            ->without(...$this->relations)
+            ->without(...array_keys($this->relations))
             ->sortedBy([])
             ->limitedTo(null, 0)
             ->asQuery('COUNT(*)')
@@ -276,19 +289,16 @@ class AbstractRelentity implements RelentityInterface
     public function with(string ...$relations): static
     {
         array_is_list($relations) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
-        $this->relations = [
-            ...$this->relations,
-            ...$relations,
-        ];
+        foreach ($relations as $alias) {
+            $this->relations[$alias] ??= (array) (static::RELATIONS[$alias]
+                ?? throw new InvalidArgumentException('Unknown relation ' . static::class . "::RELATIONS['{$alias}']"));
+        }
         return $this;
     }
     public function without(string ...$relations): static
     {
         array_is_list($relations) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
-        $this->relations = array_values(array_diff(
-            $this->relations,
-            $relations,
-        ));
+        $this->relations = array_diff_key($this->relations, array_flip($relations));
         return $this;
     }
 }

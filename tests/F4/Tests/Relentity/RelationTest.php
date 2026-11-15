@@ -14,6 +14,8 @@ use F4\Tests\Relentity\Fixtures\{
     InvalidRelations,
     NoPrimaryKey,
     NoTableName,
+    OwnedFile,
+    UnknownDefaultRelation,
 };
 
 final class RelationTest extends TestCase
@@ -80,6 +82,65 @@ final class RelationTest extends TestCase
             File::fetch()->with('tags')->asSQL(),
             File::fetch()->with('owner', 'tags')->without('owner')->asSQL(),
         );
+    }
+
+    public function testDefaultRelationsAreJoined(): void
+    {
+        $this->assertSame(
+            File::fetch()->with('owner')->asSQL(),
+            OwnedFile::fetch()->asSQL(),
+        );
+    }
+
+    public function testDefaultRelationIsNotJoinedTwice(): void
+    {
+        $this->assertSame(
+            OwnedFile::fetch()->asSQL(),
+            OwnedFile::fetch()->with('owner')->asSQL(),
+        );
+    }
+
+    public function testWithoutRemovesDefaultRelation(): void
+    {
+        $this->assertSame(
+            File::fetch()->asSQL(),
+            OwnedFile::fetch()->without('owner')->asSQL(),
+        );
+    }
+
+    public function testWithoutIgnoresInactiveAndUnknownRelations(): void
+    {
+        $this->assertSame(
+            File::fetch()->with('owner')->asSQL(),
+            File::fetch()->with('owner')->without('tags', 'undeclared')->asSQL(),
+        );
+    }
+
+    public function testRelationsKeepTheOrderTheyWereAddedIn(): void
+    {
+        $this->assertSame(
+            File::fetch()->with('owner', 'tags')->asSQL(),
+            File::fetch()->with('owner')->with('tags', 'owner')->asSQL(),
+        );
+        $this->assertNotSame(
+            File::fetch()->with('owner', 'tags')->asSQL(),
+            File::fetch()->with('tags', 'owner')->asSQL(),
+        );
+    }
+
+    public function testUnknownRelationIsRejectedByWith(): void
+    {
+        $files = File::fetch();
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("Unknown relation F4\\Tests\\Relentity\\Fixtures\\File::RELATIONS['undeclared']");
+        $files->with('undeclared');
+    }
+
+    public function testUnknownDefaultRelationIsRejected(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("Unknown relation F4\\Tests\\Relentity\\Fixtures\\UnknownDefaultRelation::RELATIONS['undeclared']");
+        UnknownDefaultRelation::fetch();
     }
 
     public static function invalidRelationProvider(): array

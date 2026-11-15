@@ -34,6 +34,7 @@ interface RelentityInterface {
     public function matching(array|ConditionCollection ...$filters): static;
     public function skipping(int $rows): static;
     public function revealing(string|array ...$columns): static;
+    public function selecting(string|array|SelectExpressionCollection $columns): static;
     public function sortedBy(array|OrderCollection ...$criteria): static;
     public function with(string ...$relations): static;
     public function without(string ...$relations): static;

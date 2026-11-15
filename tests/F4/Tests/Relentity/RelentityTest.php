@@ -12,6 +12,7 @@ use F4\Tests\Relentity\Fixtures\{
     File,
     FileAttribute,
     FileTag,
+    OwnedFile,
     Tag,
 };
 
@@ -167,6 +168,54 @@ final class RelentityTest extends TestCase
         $this->assertSame(
             'SELECT "name", "value" FROM "attribute" LIMIT 100',
             FileAttribute::fetch(columns: ['name', 'value'])->asSQL(),
+        );
+    }
+
+    public static function selectingProvider(): array
+    {
+        return [
+            'replaces the default columns' => [
+                static fn(): OwnedFile => OwnedFile::fetch()->without('owner')->selecting(['name', 'size']),
+                'SELECT "name", "size" FROM "file" LIMIT 100',
+            ],
+            'replaces the fetch() columns' => [
+                static fn(): OwnedFile => OwnedFile::fetch(['name'])->without('owner')->selecting(columns: 'size'),
+                'SELECT "size" FROM "file" LIMIT 100',
+            ],
+            'repeated calls replace instead of adding' => [
+                static fn(): OwnedFile => OwnedFile::fetch()->without('owner')->selecting(['name'])->selecting(['size']),
+                'SELECT "size" FROM "file" LIMIT 100',
+            ],
+            'null returns to the default columns' => [
+                static fn(): OwnedFile => OwnedFile::fetch(['name'])->without('owner')->selecting(null),
+                'SELECT * FROM "file" LIMIT 100',
+            ],
+            'asQuery() columns still take precedence' => [
+                static fn(): OwnedFile => OwnedFile::fetch()->without('owner')->selecting(['name']),
+                'SELECT "size" FROM "file" LIMIT 100',
+                ['size'],
+            ],
+            'relation columns are kept' => [
+                static fn(): OwnedFile => OwnedFile::fetch()->selecting(['name']),
+                'SELECT "name", "owner"."relation_value" AS "owner" FROM "file"'
+                    . ' LEFT JOIN LATERAL (SELECT to_jsonb("relation_rows".*) AS "relation_value" FROM'
+                    . ' (SELECT * FROM "user" WHERE "user"."userUUID" = "file"."ownerUUID" LIMIT 1) AS "relation_rows") AS "owner" ON true'
+                    . ' LIMIT 100',
+            ],
+        ];
+    }
+
+    #[DataProvider('selectingProvider')]
+    public function testSelecting(callable $build, string $expected, ?array $asQueryColumns = null): void
+    {
+        $this->assertSame($expected, $build()->asQuery($asQueryColumns)->asSQL());
+    }
+
+    public function testSelectingDoesNotApplyToUpdate(): void
+    {
+        $this->assertSame(
+            'UPDATE "attribute" SET "visible" = TRUE RETURNING *',
+            FileAttribute::update(['visible' => true])->selecting(['name'])->asSQL(),
         );
     }
 
