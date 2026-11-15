@@ -38,11 +38,13 @@ use F4\Relentity\{
   AbstractRelentity,
   RelentityInterface,
   Relation\ManyToMany,
+  Relation\ManyToOne,
   Relation\OneToMany,
   Relation\OneToOne,
 };
 
 use MyApp\{
+  Badges,
   Contractors,
   EmployeeSkills,
   Projects,
@@ -66,10 +68,11 @@ class Employees extends AbstractRelentity implements RelentityInterface {
   // define relations declaratively
   public const array RELATIONS = [
     'vacations' => Vacations::class,                           // shorthand for [Vacations::class, OneToMany::class]
-    'contractor' => [Contractors::class, OneToOne::class,      // "belongs to": the key lives on the source
-      'sourceKey' => 'contractorUUID',
-      'targetKey' => 'contractorUUID',
+    'contractor' => [Contractors::class, ManyToOne::class],    // "belongs to": employee.contractorUUID
+    'manager' => [Employees::class, ManyToOne::class,          // same, with a differently named column
+      'sourceKey' => 'managerUUID',
     ],
+    'badge' => [Badges::class, OneToOne::class],               // "has one": badge.employeeUUID
     'skills' => [Skills::class, ManyToMany::class, 'through' => EmployeeSkills::class],  // link table as an entity
     'projects' => [Projects::class, ManyToMany::class, 'through' => 'employee_project'], // or just a table name
     'recentTimesheets' => [Timesheets::class, OneToMany::class,
@@ -142,18 +145,23 @@ mistyped option fails with a clear error naming the relation, e.g.
 Every option except `through` of a `ManyToMany` relation has a default, so most
 relations need none:
 
-| Option | OneToOne | OneToMany | ManyToMany | Purpose |
-|---|---|---|---|---|
-| `sourceKey` | `source::PRIMARY_KEY` | `source::PRIMARY_KEY` | `source::PRIMARY_KEY` | column on the source table |
-| `targetKey` | `source::PRIMARY_KEY` | `source::PRIMARY_KEY` | `target::PRIMARY_KEY` | column on the target table |
-| `through` | — | — | **required** | link table name or Relentity class |
-| `throughSourceKey` | — | — | `source::PRIMARY_KEY` | link-table column pointing to the source |
-| `throughTargetKey` | — | — | `target::PRIMARY_KEY` | link-table column pointing to the target |
-| `modifyTarget` | `null` | `null` | `null` | `Closure(target): target`, modifies the target query |
-| `modifyThrough` | — | — | `null` | `Closure(through): through`, requires `through` to be a Relentity class |
-| `count` | — | `false` | `false` | return the number of related rows instead of the rows |
-| `customSelectCallback` | `null` | `null` | `null` | last resort: `Closure($query, $source, $alias): $query`, replaces the select expression |
-| `customJoinCallback` | `null` | `null` | `null` | last resort: `Closure($query, $source, $alias): $query`, replaces the join |
+| Option | OneToOne | ManyToOne | OneToMany | ManyToMany | Purpose |
+|---|---|---|---|---|---|
+| `sourceKey` | `source::PRIMARY_KEY` | `target::PRIMARY_KEY` | `source::PRIMARY_KEY` | `source::PRIMARY_KEY` | column on the source table |
+| `targetKey` | `source::PRIMARY_KEY` | `target::PRIMARY_KEY` | `source::PRIMARY_KEY` | `target::PRIMARY_KEY` | column on the target table |
+| `through` | — | — | — | **required** | link table name or Relentity class |
+| `throughSourceKey` | — | — | — | `source::PRIMARY_KEY` | link-table column pointing to the source |
+| `throughTargetKey` | — | — | — | `target::PRIMARY_KEY` | link-table column pointing to the target |
+| `modifyTarget` | `null` | `null` | `null` | `null` | `Closure(target): target`, modifies the target query |
+| `modifyThrough` | — | — | — | `null` | `Closure(through): through`, requires `through` to be a Relentity class |
+| `count` | — | — | `false` | `false` | return the number of related rows instead of the rows |
+| `customSelectCallback` | `null` | `null` | `null` | `null` | last resort: `Closure($query, $source, $alias): $query`, replaces the select expression |
+| `customJoinCallback` | `null` | `null` | `null` | `null` | last resort: `Closure($query, $source, $alias): $query`, replaces the join |
+
+`OneToOne` and `ManyToOne` both return a single related row and differ only in where the
+key lives, which decides their default keys: use `OneToOne` when the target table points
+to the source ("has one"), and `ManyToOne` when the source table points to the target
+("belongs to").
 
 #### Modifying the target
 
