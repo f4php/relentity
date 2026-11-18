@@ -4,65 +4,49 @@ declare(strict_types=1);
 
 namespace F4\Relentity\Relation;
 
-use Closure;
+use RuntimeException;
 
+use F4\DB;
 use F4\DB\{
     Fragment,
     QueryBuilderInterface,
 };
+
 use F4\Relentity\{
-    RelentityInterface,
     Relation\AbstractRelation,
     Relation\RelationInterface,
 };
 
-/**
- * Related rows as a JSON list (or null when there are none), or their number with 'count' => true.
- */
 class OneToMany extends AbstractRelation implements RelationInterface {
 
-    /**
-     * @param class-string<RelentityInterface> $target
-     */
-    public function __construct(
-        string $target,
-        ?string $sourceKey = null,
-        ?string $targetKey = null,
-        ?Closure $modifyTarget = null,
-        protected bool $count = false,
-        ?Closure $customSelectCallback = null,
-        ?Closure $customJoinCallback = null,
-    ) {
-        parent::__construct($target, $sourceKey, $targetKey, $modifyTarget, $customSelectCallback, $customJoinCallback);
-    }
-
-    public function appendJoin(QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface {
-        if ($this->customJoinCallback) {
-            return ($this->customJoinCallback)($query, $source, $alias);
+    public function appendJoinExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface {
+        if(empty($this->source)) {
+            throw new RuntimeException('Cannot determine source relentity, a withSource() call on relation instance is required');
         }
-        $target = $this->target::fetch();
-        if ($this->count) {
-            // The target's DEFAULT_LIMIT must not cap a count
-            $target->limitedTo(null, 0);
-        }
-        if ($this->modifyTarget) {
-            $target = ($this->modifyTarget)($target);
-        }
-        $sourceKey = $this->sourceKey ?? $source::PRIMARY_KEY;
-        $target->matching([
-            new Fragment('{#::#}.{#::#} = {#::#}', [
-                $query->escapeIdentifier($this->target::TABLE_NAME),
-                $query->escapeIdentifier($this->targetKey ?? $source::PRIMARY_KEY),
-                $this->buildSourceKeyReference($query, $source, $sourceKey),
-            ]),
-        ]);
+        $target = clone ($this->target);
         return $query
-            ->leftJoinLateral([
-                $alias => $this->buildJoinSubquery($query, $source, $sourceKey, $target, match ($this->count) {
-                    true => new Fragment('count(*)'),
-                    default => new Fragment('jsonb_agg({#::#})', [$this->buildRowsAsJsonb($query, $target)]),
-                }),
-            ])
+            ->leftJoinLateral(
+                new Fragment('({#::#}) AS {#::#}', [
+                    DB::select(new Fragment('jsonb_agg(to_jsonb({#::#}.*)) AS {#::#}', [
+                        $query->escapeIdentifier(self::SUBQUERY_ALIAS),
+                        $query->escapeIdentifier(static::RELATION_ROWS_ALIAS),
+                    ]))
+                        ->from([
+                            self::SUBQUERY_ALIAS => $target
+                                ->matching([
+                                    // TODO: complex and custom join statements
+                                    new Fragment('{#::#}.{#::#} = {#::#}.{#::#}', [
+                                        $query->escapeIdentifier($this->source->getTableName()),
+                                        $query->escapeIdentifier($this->sourceKey ?? $this->source->getPrimaryKey()),
+                                        $query->escapeIdentifier($target->getTableName()),
+                                        $query->escapeIdentifier($this->targetKey ?? $this->source->getPrimaryKey()),
+                                    ])
+                                ])
+                                ->asQuery(),
+                        ]),
+                    $query->escapeIdentifier($alias),
+                ])
+            )
             ->on('true');
     }
 }

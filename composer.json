@@ -29,7 +29,7 @@
     },
     "require": {
         "php": "^8.5.12",
-        "f4php/db": "^0.4.4"
+        "f4php/db": "^0.4.5"
     },
     "require-dev": {
         "phpunit/phpunit": "^12",

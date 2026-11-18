@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "071bb73019f0496ecb75a68afa250b9a",
+    "content-hash": "f2f7b5da06acffaa7769911a2ab8ba00",
     "packages": [
         {
             "name": "composer/pcre",
@@ -85,16 +85,16 @@
         },
         {
             "name": "f4php/db",
-            "version": "v0.4.4",
+            "version": "v0.4.5",
             "source": {
                 "type": "git",
                 "url": "https://github.com/f4php/db.git",
-                "reference": "1dbdac2aef15859bf72623dede82d3e3410296d6"
+                "reference": "4996ccfb5808edd110dfe29a394246941e514d06"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/f4php/db/zipball/1dbdac2aef15859bf72623dede82d3e3410296d6",
-                "reference": "1dbdac2aef15859bf72623dede82d3e3410296d6",
+                "url": "https://api.github.com/repos/f4php/db/zipball/4996ccfb5808edd110dfe29a394246941e514d06",
+                "reference": "4996ccfb5808edd110dfe29a394246941e514d06",
                 "shasum": ""
             },
             "require": {
@@ -137,10 +137,10 @@
             ],
             "support": {
                 "issues": "https://github.com/f4php/db/issues",
-                "source": "https://github.com/f4php/db/tree/v0.4.4"
+                "source": "https://github.com/f4php/db/tree/v0.4.5"
             },
-            "time": "2026-11-14T13:51:43+00:00",
-            "published-time": "2026-11-14T13:52:05+00:00"
+            "time": "2026-11-18T11:54:03+00:00",
+            "published-time": "2026-11-18T11:54:24+00:00"
         },
         {
             "name": "f4php/hookmanager",
@@ -436,11 +436,11 @@
         },
         {
             "name": "phpstan/phpstan",
-            "version": "2.3.5",
+            "version": "2.3.6",
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/645a1bd6bead15fc1b8474137467961d0fa30a79",
-                "reference": "645a1bd6bead15fc1b8474137467961d0fa30a79",
+                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/00cedebb76cc82c1592414fa4f616cefdccda16f",
+                "reference": "00cedebb76cc82c1592414fa4f616cefdccda16f",
                 "shasum": ""
             },
             "require": {
@@ -496,8 +496,8 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-11-03T12:14:22+00:00",
-            "published-time": "2026-11-03T12:14:36+00:00"
+            "time": "2026-11-15T19:58:26+00:00",
+            "published-time": "2026-11-15T19:58:39+00:00"
         },
         {
             "name": "phpstan/phpstan-phpunit",

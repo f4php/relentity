@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace F4\Relentity;
 
 use Error;
+use Closure;
 use InvalidArgumentException;
+use RuntimeException;
 use F4\DB;
 use F4\DB\{
     ConditionCollection,
@@ -27,13 +29,15 @@ use F4\Relentity\{
 use function
     array_diff_key,
     array_flip,
-    array_keys,
     array_is_list,
     array_map,
     array_reduce,
     array_slice,
     array_values,
+    in_array,
     is_array,
+    is_numeric,
+    is_string,
     is_subclass_of
 ;
 
@@ -44,7 +48,7 @@ class AbstractRelentity implements RelentityInterface
     public const string TABLE_NAME = '';
     public const string PRIMARY_KEY = '';
     public const array RELATIONS = [];
-    public const string|array DEFAULT_SELECT = '*';
+    public const null|string|array DEFAULT_SELECT = null;
     public const array DEFAULT_WHERE = [];
     public const array DEFAULT_CONCEALING = [];
     public const array DEFAULT_ORDER = [];
@@ -56,6 +60,7 @@ class AbstractRelentity implements RelentityInterface
     private string|array|SelectExpressionCollection $select = [];
     private array $values = [];
     private array $changes = [];
+    private array $joins = [];
     private array $where = [];
     /** @var list<string> keys and paths given to concealing(), DEFAULT_CONCEALING not included */
     private array $concealing = [];
@@ -82,16 +87,33 @@ class AbstractRelentity implements RelentityInterface
         if (static::PRIMARY_KEY === '') {
             throw new RelentityException(static::class . ' must define PRIMARY_KEY');
         }
-        switch($actionType) {
-            case ActionType::Fetch:
-                $this->select = $parameters ?? static::DEFAULT_SELECT;
-                break;
+        switch($this->actionType) {
             case ActionType::Add:
                 $this->values = ((array)$parameters) or throw new InvalidArgumentException("Missing data for add action");
                 break;
             case ActionType::Change:
                 $this->changes = ((array)$parameters) or throw new InvalidArgumentException("Missing data for change action");
                 break;
+            case ActionType::Count:
+                $this->select = $parameters ?? [];
+                break;
+            case ActionType::Fetch:
+                $this->select = $parameters ?? static::DEFAULT_SELECT ?? [];
+                break;
+        }
+        if ($this->actionType === ActionType::Fetch) {
+            foreach(static::RELATIONS as $alias => $definition) {
+                if(!is_string($alias) || $alias === '' || is_numeric($alias)) {
+                    throw new InvalidArgumentException('Relation alias must be non-empty string');
+                }
+                if(!is_callable($definition)) {
+                    throw new InvalidArgumentException('Relation definition must be callable');
+                }
+                $this->relations[$alias] = match( ($relation = $definition($this)) instanceof RelationInterface) {
+                    false => throw new RuntimeException('Relation definition must return instance of ' . RelationInterface::class),
+                    default => $relation->withSource($this),
+                };
+            }
         }
         $this->where = static::DEFAULT_WHERE;
         $this->order = static::DEFAULT_ORDER;
@@ -108,6 +130,10 @@ class AbstractRelentity implements RelentityInterface
     {
         return new static(ActionType::Change, $changes);
     }
+    public static function count(null|string|array|SelectExpressionCollection $columns = null): static
+    {
+        return new static(ActionType::Count, $columns);
+    }
     public static function add(array $values): static
     {
         return new static(ActionType::Add, $values);
@@ -116,43 +142,22 @@ class AbstractRelentity implements RelentityInterface
     {
         return new static(ActionType::Remove);
     }
-    /**
-     * A RELATIONS entry is either a target class, or [TargetClass::class, RelationClass::class, 'option' => value, ...],
-     * where the relation class defaults to OneToMany and options are arguments of its constructor.
-     *
-     * @return array<string, RelationInterface>
-     */
-    protected function getRelations(): array {
-        $relations = [];
-        foreach ($this->relations as $alias => $declaration) {
-            $location = static::class . "::RELATIONS['{$alias}']";
-            [$target, $relationType] = $declaration;
-            if (!is_subclass_of($target, RelentityInterface::class)) {
-                throw new InvalidArgumentException("Position 0 of {$location} must be a " . RelentityInterface::class . ' class');
-            }
-            if (!is_subclass_of($relationType, RelationInterface::class)) {
-                throw new InvalidArgumentException("Position 1 of {$location} must be a " . RelationInterface::class . ' class');
-            }
-            try {
-                $relations[$alias] = new $relationType($target, ...array_slice($declaration, 2));
-            } catch (Error $e) {
-                // Unknown, missing or mistyped options
-                throw new InvalidArgumentException("Invalid declaration of {$location}: {$e->getMessage()}", previous: $e);
-            }
-        }
-        return $relations;
+    public function getActionType(): ActionType {
+        return $this->actionType;
     }
-    /**
-     * A bare * would also expand to the column of every joined relation, which is already selected by the relation itself.
-     */
-    private function qualifyWildcard(mixed $columns): mixed
+    // private function qualifyWildcard(mixed $columns): mixed
+    // {
+    //     return match (true) {
+    //         $columns === '*' => new Fragment('{#::#}.*', [DB::escapeIdentifier(static::TABLE_NAME)]),
+    //         // Arrays nest, e.g. selecting(['*']) stores [['*']]
+    //         is_array($columns) => array_map($this->qualifyWildcard(...), $columns),
+    //         default => $columns,
+    //     };
+    // }
+    public function joinedWith(string $table, string $key): static
     {
-        return match (true) {
-            $columns === '*' => new Fragment('{#::#}.*', [DB::escapeIdentifier(static::TABLE_NAME)]),
-            // Arrays nest, e.g. selecting(['*']) stores [['*']]
-            is_array($columns) => array_map($this->qualifyWildcard(...), $columns),
-            default => $columns,
-        };
+        $this->joins[] = ['table' => $table, 'key' => $key];
+        return $this;
     }
     public function asQuery(
         null|array|string|SelectExpressionCollection $columns = null,
@@ -161,17 +166,20 @@ class AbstractRelentity implements RelentityInterface
     {
         switch ($this->actionType) {
             case ActionType::Fetch:
-                $relations = $this->getRelations();
-                $query = DB::select(match ($relations) {
-                    [] => $columns ?: $this->select,
-                    default => $this->qualifyWildcard($columns ?: $this->select),
-                });
-                foreach($relations as $alias => $relation) {
-                    $relation->appendSelect($query, $this, $alias);
+                $query = new DB();
+                $query = $query
+                    ->select($columns ?? $this->select ?: ['{#::#}.*' => $query->escapeIdentifier($this->getTableName())]);
+                foreach($this->relations as $alias => $relation) {
+                    $relation->appendSelectExpression($query, $alias);
                 }
                 $query->from(static::TABLE_NAME);
-                foreach($relations as $alias => $relation) {
-                    $relation->appendJoin($query, $this, $alias);
+                if($this->joins) {
+                    foreach($this->joins as $join) {
+                        $query->join($join['table'])->using($join['key']);
+                    }
+                }
+                foreach($this->relations as $alias => $relation) {
+                    $relation->appendJoinExpression($query, $alias);
                 }
                 break;
             case ActionType::Change:
@@ -210,6 +218,9 @@ class AbstractRelentity implements RelentityInterface
     }
     public function asRow(): ?array
     {
+        if($this->actionType === ActionType::Count) {
+            throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
+        }
         return $this->asQuery()->asRow();
     }
     public function asSQL(): string
@@ -218,11 +229,18 @@ class AbstractRelentity implements RelentityInterface
     }
     public function asTable(): array
     {
+        if($this->actionType === ActionType::Count) {
+            throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
+        }
         return $this->asQuery()->asTable();
     }
     public function asValue(string|int $column = 0): mixed
     {
-        return $this->asQuery()->asValue($column);
+        $result = $this->asQuery()->asValue($column);
+        return match($this->actionType) {
+            ActionType::Count => (int) $result,
+            default => $result,
+        };
     }
     public function concealing(string|array ...$columns): static
     {
@@ -266,12 +284,21 @@ class AbstractRelentity implements RelentityInterface
         }
         return array_values($concealed);
     }
+    public function getPrimaryKey(): string {
+        return static::PRIMARY_KEY;
+    }
+    public function getTableName(): string {
+        return static::TABLE_NAME;
+    }
     /**
      * Replaces the columns given to fetch(), or DEFAULT_SELECT, instead of adding to them.
      * Only applies to fetch().
      */
     public function selecting(string|array|SelectExpressionCollection ...$columns): static
     {
+        if(!in_array($this->actionType, [ActionType::Fetch])) {
+            throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
+        }
         array_is_list($columns) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
         $this->select = $columns;
         return $this;
@@ -283,6 +310,9 @@ class AbstractRelentity implements RelentityInterface
     }
     public function limitedTo(?int $rows, ?int $skipping = null): static
     {
+        if(in_array($this->actionType, [ActionType::Count, ActionType::Remove])) {
+            throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
+        }
         $this->limit = $rows;
         if ($skipping !== null) {
             $this->offset = $skipping;
@@ -291,21 +321,15 @@ class AbstractRelentity implements RelentityInterface
     }
     public function skipping(int $rows): static
     {
+        if(in_array($this->actionType, [ActionType::Count, ActionType::Remove])) {
+            throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
+        }
         $this->offset = $rows;
         return $this;
     }
     public function execute(): void
     {
         $this->asQuery()->commit();
-    }
-    public function asCount(): int
-    {
-        return (clone $this)
-            ->without(...array_keys($this->relations))
-            ->sortedBy([])
-            ->limitedTo(null, 0)
-            ->asQuery('COUNT(*)')
-            ->asValue(index: 0);
     }
     public function matching(array|ConditionCollection ...$filters): static
     {
@@ -322,12 +346,18 @@ class AbstractRelentity implements RelentityInterface
      */
     public function sortedBy(array|OrderCollection ...$criteria): static
     {
+        if(in_array($this->actionType, [ActionType::Count])) {
+            throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
+        }
         array_is_list($criteria) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
         $this->order = $criteria;
         return $this;
     }
     public function with(string ...$relations): static
     {
+        if(in_array($this->actionType, [ActionType::Add, ActionType::Change, ActionType::Count, ActionType::Remove])) {
+            throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
+        }
         array_is_list($relations) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
         foreach ($relations as $alias) {
             if (isset($this->relations[$alias])) {
@@ -346,6 +376,9 @@ class AbstractRelentity implements RelentityInterface
     }
     public function without(string ...$relations): static
     {
+        if(in_array($this->actionType, [ActionType::Add, ActionType::Change, ActionType::Count, ActionType::Remove])) {
+            throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
+        }
         array_is_list($relations) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
         $this->relations = array_diff_key($this->relations, array_flip($relations));
         return $this;

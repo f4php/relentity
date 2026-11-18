@@ -11,12 +11,12 @@ use F4\Relentity\{
     RelentityInterface,
 };
 
-/**
- * A relation is a stateless definition built from one RELATIONS entry: its constructor
- * receives the target class followed by the entry's named options. The same instance
- * compiles the relation for any source instance and alias.
- */
 interface RelationInterface {
-    public function appendSelect(QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface;
-    public function appendJoin(QueryBuilderInterface $query, RelentityInterface $source, string $alias): QueryBuilderInterface;
+    public static function of(string|RelentityInterface $relentity): static;
+    // public function via(string|RelentityInterface $relentity, mixed ...$options): static;
+    // public function applying(Closure $callback): static;
+
+    public function withSource(RelentityInterface $relentity): static;
+    public function appendSelectExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface;
+    public function appendJoinExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface;
 }
