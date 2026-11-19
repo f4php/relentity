@@ -13,11 +13,16 @@ use F4\DB\{
 };
 
 use F4\Relentity\{
+    ActionType,
     Relation\AbstractRelation,
     Relation\RelationInterface,
 };
 
 class One extends AbstractRelation implements RelationInterface {
+
+    protected const array SUPPORTED_ACTIONS = [
+        ActionType::Fetch,
+    ];
 
     public function appendJoinExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface {
         if(empty($this->source)) {

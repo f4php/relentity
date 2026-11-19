@@ -9,6 +9,7 @@ use RuntimeException;
 use F4\DB;
 use F4\DB\{
     ConditionCollection,
+    Fragment,
     OrderCollection,
     QueryBuilderInterface,
     SelectExpressionCollection,
@@ -114,9 +115,9 @@ class AbstractRelentity implements RelentityInterface
     {
         return new static(ActionType::Change, $changes);
     }
-    public static function count(null|string|array|SelectExpressionCollection $columns = null): static
+    public static function count(): static
     {
-        return new static(ActionType::Count, $columns);
+        return new static(ActionType::Count);
     }
     public static function add(array $values): static
     {
@@ -131,13 +132,18 @@ class AbstractRelentity implements RelentityInterface
     }
     public function joinedWith(string|array $table, string|array|ConditionCollection $condition, string $method='join'): static
     {
+        if(!in_array($this->actionType, [
+            ActionType::Fetch,
+        ])) {
+            throw new InvalidArgumentException(__FUNCTION__ . "() is not supported for intended action");
+        }
         if(!in_array($method, [
                 'crossJoin', 'crossJoinLateral',
                 'fullOuterJoin',
-                'innnerJoin', 'innerJoinLateral',
+                'innerJoin', 'innerJoinLateral',
                 'join', 'joinLateral',
                 'leftJoin', 'leftJoinLateral', 'leftOuterJoin',
-                'naturalJoin', 'narualLeftOuterJoin', 'naturalRightOuterJoin',
+                'naturalJoin', 'naturalLeftOuterJoin', 'naturalRightOuterJoin',
                 'rightJoin', 'rightOuterJoin',
             ])) {
             throw new InvalidArgumentException("Unsupported join method {$method}");
@@ -175,7 +181,7 @@ class AbstractRelentity implements RelentityInterface
                 foreach($relations as $alias => $relation) {
                     $relation->appendSelectExpression($query, $alias);
                 }
-                $query->from(static::TABLE_NAME);
+                $query->from($this->getTableName());
                 if($this->joins) {
                     foreach($this->joins as $join) {
                         $method = $join['method'];
@@ -195,16 +201,17 @@ class AbstractRelentity implements RelentityInterface
             case ActionType::Count:
                 $query = new DB();
                 $query = $query
-                    ->select($columns ?? $this->select ?: ['COUNT({#::#}.*)' => $query->escapeIdentifier($this->getTableName())]);
+                    ->select('COUNT(*)')
+                    ->from($this->getTableName());
                 break;
             case ActionType::Change:
-                $query = DB::update(static::TABLE_NAME)->set($this->changes);
+                $query = DB::update($this->getTableName())->set($this->changes);
                 break;
             case ActionType::Add:
-                $query = DB::insert()->into(static::TABLE_NAME)->values($this->values);
+                $query = DB::insert()->into($this->getTableName())->values($this->values);
                 break;
             case ActionType::Remove:
-                $query = DB::delete()->from(static::TABLE_NAME);
+                $query = DB::delete()->from($this->getTableName());
                 break;
             default: throw new InvalidArgumentException('Uknown entity action');
         };
@@ -223,7 +230,7 @@ class AbstractRelentity implements RelentityInterface
         if ($this->actionType === ActionType::Fetch && $this->offset) {
             $query->offset($this->offset);
         }
-        if($this->actionType !== ActionType::Fetch && ($returning ?? $this->returning)) {
+        if(in_array($this->actionType, [ActionType::Add, ActionType::Change, ActionType::Remove]) && ($returning ?? $this->returning)) {
             $query->returning($returning ?? $this->returning);
         }
         // Only takes effect when this query is executed itself: as the target of a relation
@@ -367,10 +374,12 @@ class AbstractRelentity implements RelentityInterface
             throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
         }
         array_is_list($relations) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
-
         foreach ($relations as $relation) {
             if (is_array($relation)) {
                 foreach($relation as $alias => $definition) {
+                    if(is_numeric($definition)) {
+                        throw new InvalidArgumentException('Relation customization must have an alias');
+                    }
                     if(!is_callable($definition)) {
                         throw new InvalidArgumentException('Relation customization must be a callable');
                     }

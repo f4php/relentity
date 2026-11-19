@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace F4\Relentity\Relation;
 
 use RuntimeException;
+use InvalidArgumentException;
 
 use F4\DB;
 use F4\DB\{
@@ -14,6 +15,7 @@ use F4\DB\{
 };
 
 use F4\Relentity\{
+    ActionType,
     RelentityInterface,
     Relation\AbstractRelation,
     Relation\RelationInterface,
@@ -24,9 +26,12 @@ use function
 ;
 
 class ManyToMany extends AbstractRelation implements RelationInterface {
-
+    protected const array SUPPORTED_ACTIONS = [
+        ActionType::Fetch,
+    ];
     protected string $viaTable;
     protected string|array|ConditionCollection $viaCondition;
+
     public function via(string|RelentityInterface $tableOrRelentity, string|array|ConditionCollection $condition): static {
         $this->viaTable = match($tableOrRelentity instanceof RelentityInterface) {
             true => $tableOrRelentity->getTableName(),

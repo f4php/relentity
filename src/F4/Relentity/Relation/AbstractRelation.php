@@ -14,11 +14,13 @@ use F4\DB\{
     Concealment\ConcealmentPath,
 };
 use F4\Relentity\{
+    ActionType,
     RelentityInterface,
     Relation\RelationInterface,
 };
 
 use function
+    in_array,
     is_subclass_of
 ;
 
@@ -26,6 +28,10 @@ abstract class AbstractRelation implements RelationInterface {
 
     public const string RELATION_ROWS_ALIAS = '___relation_rows___'; // unique enough to avoid conflict with actual column names
     protected const string SUBQUERY_ALIAS = '___subquery___'; // unique enough to avoid conflict with actual table names
+    protected const array SUPPORTED_ACTIONS = [
+        ActionType::Count,
+        ActionType::Fetch,
+    ];
 
     protected RelentityInterface $source;
     protected RelentityInterface $target;
@@ -34,7 +40,10 @@ abstract class AbstractRelation implements RelationInterface {
 
     protected function __construct(string|RelentityInterface $relentity) {
         $this->target = match($relentity instanceof RelentityInterface) {
-            true => $relentity,
+            true => match(in_array($actionType = $relentity->getActionType(), static::SUPPORTED_ACTIONS)) {
+                false => throw new InvalidArgumentException(static::class . " does not support {$actionType->name} action"),
+                default => $relentity,
+            } ,
             default => match(is_subclass_of($relentity, RelentityInterface::class)) {
                 false => throw new InvalidArgumentException("Relation must be a " . RelentityInterface::class . ' class'),
                 default => $relentity::fetch(),
