@@ -18,6 +18,7 @@ use F4\Relentity\{
 interface RelentityInterface {
     public const string TABLE_NAME = '';
     public const string PRIMARY_KEY = '';
+    final public const string COUNT_ALIAS = 'count';
     public static function add(array $values): static;
     public static function change(array $changes): static;
     public static function count(): static;

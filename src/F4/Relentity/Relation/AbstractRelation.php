@@ -40,7 +40,7 @@ abstract class AbstractRelation implements RelationInterface {
 
     final protected function __construct(string|RelentityInterface $relentity) {
         $this->target = match($relentity instanceof RelentityInterface) {
-            true => match(in_array($actionType = $relentity->getActionType(), static::SUPPORTED_ACTIONS)) {
+            true => match(in_array($actionType = $relentity->getActionType(), static::SUPPORTED_ACTIONS, strict: true)) {
                 false => throw new InvalidArgumentException(static::class . " does not support {$actionType->name} action"),
                 default => $relentity,
             } ,
