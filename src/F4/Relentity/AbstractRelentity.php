@@ -80,9 +80,6 @@ class AbstractRelentity implements RelentityInterface
             case ActionType::Change:
                 $this->changes = ((array)$parameters) or throw new InvalidArgumentException("Missing data for change action");
                 break;
-            case ActionType::Count:
-                $this->select = $parameters ?? [];
-                break;
             case ActionType::Fetch:
                 $this->select = $parameters ?? static::DEFAULT_SELECT ?? [];
                 break;

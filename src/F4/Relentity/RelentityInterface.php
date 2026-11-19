@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace F4\Relentity;
 
-use Closure;
-
 use F4\DB\{
     ConditionCollection,
     OrderCollection,

@@ -13,9 +13,6 @@ use F4\Relentity\{
 
 interface RelationInterface {
     public static function of(string|RelentityInterface $relentity): static;
-    // public function via(string|RelentityInterface $relentity, mixed ...$options): static;
-    // public function applying(Closure $callback): static;
-
     public function withSource(RelentityInterface $relentity): static;
     public function appendSelectExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface;
     public function appendJoinExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface;

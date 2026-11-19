@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace F4\Relentity\Relation;
 
 use RuntimeException;
-use InvalidArgumentException;
 
 use F4\DB;
 use F4\DB\{
@@ -20,10 +19,6 @@ use F4\Relentity\{
     Relation\AbstractRelation,
     Relation\RelationInterface,
 };
-
-use function
-    is_subclass_of
-;
 
 class ManyToMany extends AbstractRelation implements RelationInterface {
     protected const array SUPPORTED_ACTIONS = [
