@@ -4,14 +4,11 @@ declare(strict_types=1);
 
 namespace F4\Relentity;
 
-use Error;
-use Closure;
 use InvalidArgumentException;
 use RuntimeException;
 use F4\DB;
 use F4\DB\{
     ConditionCollection,
-    Fragment,
     OrderCollection,
     QueryBuilderInterface,
     SelectExpressionCollection,
@@ -22,7 +19,6 @@ use F4\Relentity\{
     ActionType,
     RelentityInterface,
     Exception\RelentityException,
-    Relation\OneToMany,
     Relation\RelationInterface,
 };
 
@@ -30,15 +26,12 @@ use function
     array_diff_key,
     array_flip,
     array_is_list,
-    array_map,
     array_reduce,
-    array_slice,
     array_values,
     in_array,
     is_array,
     is_numeric,
-    is_string,
-    is_subclass_of
+    is_string
 ;
 
 class AbstractRelentity implements RelentityInterface
@@ -62,20 +55,12 @@ class AbstractRelentity implements RelentityInterface
     private array $changes = [];
     private array $joins = [];
     private array $where = [];
-    /** @var list<string> keys and paths given to concealing(), DEFAULT_CONCEALING not included */
     private array $concealing = [];
-    /** @var list<string> keys and paths given to revealing() */
     private array $revealing = [];
     private array $order = [];
     private ?string $returning = null;
     private ?int $limit = null;
     private int $offset = 0;
-    /**
-     * Active relations keyed by alias, as complete declarations copied from RELATIONS:
-     * [TargetClass::class, RelationClass::class, 'option' => value, ...]
-     *
-     * @var array<string, array>
-     */
     private array $relations = [];
     private ?AdapterInterface $adapter = null;
 
@@ -101,25 +86,24 @@ class AbstractRelentity implements RelentityInterface
                 $this->select = $parameters ?? static::DEFAULT_SELECT ?? [];
                 break;
         }
-        if ($this->actionType === ActionType::Fetch) {
-            foreach(static::RELATIONS as $alias => $definition) {
-                if(!is_string($alias) || $alias === '' || is_numeric($alias)) {
-                    throw new InvalidArgumentException('Relation alias must be non-empty string');
-                }
-                if(!is_callable($definition)) {
-                    throw new InvalidArgumentException('Relation definition must be callable');
-                }
-                $this->relations[$alias] = match( ($relation = $definition($this)) instanceof RelationInterface) {
-                    false => throw new RuntimeException('Relation definition must return instance of ' . RelationInterface::class),
-                    default => $relation->withSource($this),
-                };
-            }
-        }
         $this->where = static::DEFAULT_WHERE;
         $this->order = static::DEFAULT_ORDER;
         $this->limit = static::DEFAULT_LIMIT;
         $this->returning = static::DEFAULT_RETURNING;
-        $this->with(...static::DEFAULT_RELATIONS);
+        $this->relations = array_reduce(
+            array: static::DEFAULT_RELATIONS,
+            callback: fn(array $relations, string $alias) => 
+                match(static::RELATIONS[$alias] ?? null) {
+                    null => throw new InvalidArgumentException("Relation {$alias} undefined"),
+                    default => [
+                        ...$relations,
+                        ...[
+                            $alias => static::RELATIONS[$alias],
+                        ],
+                    ],
+                },
+            initial: [],
+        );
         $this->adapter = static::DEFAULT_ADAPTER;
     }
     public static function fetch(null|string|array|SelectExpressionCollection $columns = null): static
@@ -145,18 +129,24 @@ class AbstractRelentity implements RelentityInterface
     public function getActionType(): ActionType {
         return $this->actionType;
     }
-    // private function qualifyWildcard(mixed $columns): mixed
-    // {
-    //     return match (true) {
-    //         $columns === '*' => new Fragment('{#::#}.*', [DB::escapeIdentifier(static::TABLE_NAME)]),
-    //         // Arrays nest, e.g. selecting(['*']) stores [['*']]
-    //         is_array($columns) => array_map($this->qualifyWildcard(...), $columns),
-    //         default => $columns,
-    //     };
-    // }
-    public function joinedWith(string $table, string $key): static
+    public function joinedWith(string|array $table, string|array|ConditionCollection $condition, string $method='join'): static
     {
-        $this->joins[] = ['table' => $table, 'key' => $key];
+        if(!in_array($method, [
+                'crossJoin', 'crossJoinLateral',
+                'fullOuterJoin',
+                'innnerJoin', 'innerJoinLateral',
+                'join', 'joinLateral',
+                'leftJoin', 'leftJoinLateral', 'leftOuterJoin',
+                'naturalJoin', 'narualLeftOuterJoin', 'naturalRightOuterJoin',
+                'rightJoin', 'rightOuterJoin',
+            ])) {
+            throw new InvalidArgumentException("Unsupported join method {$method}");
+        }
+        $this->joins[] = [
+            'table' => $table,
+            'condition' => $condition,
+            'method' => $method,
+        ];
         return $this;
     }
     public function asQuery(
@@ -166,21 +156,46 @@ class AbstractRelentity implements RelentityInterface
     {
         switch ($this->actionType) {
             case ActionType::Fetch:
+                foreach(($relations = $this->relations) as $alias => $definition) {
+                    if(!is_string($alias) || $alias === '' || is_numeric($alias)) {
+                        throw new InvalidArgumentException('Relation alias must be non-empty string');
+                    }
+                    if(!is_callable($definition)) {
+                        throw new InvalidArgumentException('Relation definition must be callable');
+                    }
+                    $relations[$alias] = match( ($relation = $definition($this)) instanceof RelationInterface) {
+                        false => throw new RuntimeException('Relation definition must return instance of ' . RelationInterface::class),
+                        default => $relation->withSource($this),
+                    };
+                }
+
                 $query = new DB();
                 $query = $query
                     ->select($columns ?? $this->select ?: ['{#::#}.*' => $query->escapeIdentifier($this->getTableName())]);
-                foreach($this->relations as $alias => $relation) {
+                foreach($relations as $alias => $relation) {
                     $relation->appendSelectExpression($query, $alias);
                 }
                 $query->from(static::TABLE_NAME);
                 if($this->joins) {
                     foreach($this->joins as $join) {
-                        $query->join($join['table'])->using($join['key']);
+                        $method = $join['method'];
+                        $query->$method($join['table']);
+                        if(is_string($join['condition'])) {
+                            $query->using($join['condition']);
+                        }
+                        else {
+                            $query->on($join['condition']);
+                        }
                     }
                 }
-                foreach($this->relations as $alias => $relation) {
+                foreach($relations as $alias => $relation) {
                     $relation->appendJoinExpression($query, $alias);
                 }
+                break;
+            case ActionType::Count:
+                $query = new DB();
+                $query = $query
+                    ->select($columns ?? $this->select ?: ['COUNT({#::#}.*)' => $query->escapeIdentifier($this->getTableName())]);
                 break;
             case ActionType::Change:
                 $query = DB::update(static::TABLE_NAME)->set($this->changes);
@@ -337,13 +352,6 @@ class AbstractRelentity implements RelentityInterface
         $this->where = [...$this->where, ...$filters];
         return $this;
     }
-    /**
-     * Replaces the current ordering, DEFAULT_ORDER included, instead of adding to it, and
-     * removes it when called without arguments. Unlike matching(), with(), concealing() and
-     * revealing(), which add to what is already set, repeated calls do not accumulate:
-     * prepending to a default ordering would rarely be useful, and appending would have no
-     * visible effect. Pass all criteria in a single call.
-     */
     public function sortedBy(array|OrderCollection ...$criteria): static
     {
         if(in_array($this->actionType, [ActionType::Count])) {
@@ -353,24 +361,28 @@ class AbstractRelentity implements RelentityInterface
         $this->order = $criteria;
         return $this;
     }
-    public function with(string ...$relations): static
+    public function with(string|array ...$relations): static
     {
         if(in_array($this->actionType, [ActionType::Add, ActionType::Change, ActionType::Count, ActionType::Remove])) {
             throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
         }
         array_is_list($relations) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
-        foreach ($relations as $alias) {
-            if (isset($this->relations[$alias])) {
-                continue;
+
+        foreach ($relations as $relation) {
+            if (is_array($relation)) {
+                foreach($relation as $alias => $definition) {
+                    if(!is_callable($definition)) {
+                        throw new InvalidArgumentException('Relation customization must be a callable');
+                    }
+                    $this->relations[$alias] = $definition;
+                }
             }
-            $declaration = (array) (static::RELATIONS[$alias]
-                ?? throw new InvalidArgumentException('Unknown relation ' . static::class . "::RELATIONS['{$alias}']"));
-            // Target and relation class always take positions 0 and 1, so that options follow them
-            $this->relations[$alias] = [
-                $declaration[0] ?? null,
-                $declaration[1] ?? OneToMany::class,
-                ...array_diff_key($declaration, [0 => true, 1 => true]),
-            ];
+            else if((static::RELATIONS[$relation] ?? null) === null) {
+                throw new InvalidArgumentException("Unknown relation {$relation}");
+            }
+            else {
+                $this->relations[$relation] = static::RELATIONS[$relation];
+            }
         }
         return $this;
     }

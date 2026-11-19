@@ -8,6 +8,7 @@ use RuntimeException;
 
 use F4\DB;
 use F4\DB\{
+    ConditionCollection,
     Fragment,
     QueryBuilderInterface,
 };
@@ -25,18 +26,21 @@ use function
 class ManyToMany extends AbstractRelation implements RelationInterface {
 
     protected string $viaTable;
-    protected string $viaKey;
-    public function via(string|RelentityInterface $tableOrRelentity, string $key): static {
+    protected string|array|ConditionCollection $viaCondition;
+    public function via(string|RelentityInterface $tableOrRelentity, string|array|ConditionCollection $condition): static {
         $this->viaTable = match($tableOrRelentity instanceof RelentityInterface) {
             true => $tableOrRelentity->getTableName(),
             default => $tableOrRelentity,
         };
-        $this->viaKey = $key;
+        $this->viaCondition = $condition;
         return $this;
     }
     public function appendJoinExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface {
         if(empty($this->source)) {
             throw new RuntimeException('Cannot determine source relentity, a withSource() call on relation instance is required');
+        }
+        if(empty($this->viaTable) || empty($this->viaCondition)) {
+            throw new RuntimeException('Association entity is missing, use via()');
         }
         $target = clone ($this->target);
         return $query
@@ -49,8 +53,8 @@ class ManyToMany extends AbstractRelation implements RelationInterface {
                         ->from([
                             self::SUBQUERY_ALIAS => $target
                                 ->joinedWith(
-                                    $this->viaTable,
-                                    $this->viaKey,
+                                    table: $this->viaTable,
+                                    condition: $this->viaCondition,
                                 )
                                 ->matching([
                                     // TODO: complex and custom join statements

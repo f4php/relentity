@@ -17,7 +17,7 @@ use F4\Relentity\{
     Relation\RelationInterface,
 };
 
-class OneToMany extends AbstractRelation implements RelationInterface {
+class One extends AbstractRelation implements RelationInterface {
 
     public function appendJoinExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface {
         if(empty($this->source)) {
@@ -27,7 +27,7 @@ class OneToMany extends AbstractRelation implements RelationInterface {
         return $query
             ->leftJoinLateral(
                 new Fragment('({#::#}) AS {#::#}', [
-                    DB::select(new Fragment('jsonb_agg(to_jsonb({#::#}.*)) AS {#::#}', [
+                    DB::select(new Fragment('to_jsonb({#::#}.*) AS {#::#}', [
                         $query->escapeIdentifier(self::SUBQUERY_ALIAS),
                         $query->escapeIdentifier(static::RELATION_ROWS_ALIAS),
                     ]))
@@ -37,11 +37,12 @@ class OneToMany extends AbstractRelation implements RelationInterface {
                                     // TODO: complex and custom join statements
                                     new Fragment('{#::#}.{#::#} = {#::#}.{#::#}', [
                                         $query->escapeIdentifier($this->source->getTableName()),
-                                        $query->escapeIdentifier($this->sourceKey ?? $this->source->getPrimaryKey()),
+                                        $query->escapeIdentifier($this->sourceKey ?? $target->getPrimaryKey()),
                                         $query->escapeIdentifier($target->getTableName()),
-                                        $query->escapeIdentifier($this->targetKey ?? $this->source->getPrimaryKey()),
+                                        $query->escapeIdentifier($this->targetKey ?? $target->getPrimaryKey()),
                                     ])
                                 ])
+                                ->limitedTo(1)
                                 ->asQuery(),
                         ]),
                     $query->escapeIdentifier($alias),
