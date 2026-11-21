@@ -89,7 +89,7 @@ Employees::fetch()->enabled()->asSQL();
 | `DEFAULT_LIMIT` | `100` | `fetch()` | `limitedTo()`, `unlimited()`; `null` means no limit |
 | `DEFAULT_RETURNING` | `'*'` | `add()`, `change()`, `remove()` | `asQuery(returning: ...)`; `null` means no `RETURNING` |
 | `DEFAULT_RELATIONS` | none | `fetch()` | extended by `with()`, reduced by `without()` |
-| `DEFAULT_CONCEALING` | none | all | see [Concealing columns](#concealing-columns) |
+| `DEFAULT_CONCEALING` | none | `fetch()`, and `RETURNING` of `add()`, `change()`, `remove()` | extended by `concealing()`, reduced by `revealing()`, see [Concealing columns](#concealing-columns) |
 | `DEFAULT_ADAPTER` | the configured adapter | all | a class name implementing `F4\DB\Adapter\AdapterInterface` |
 
 `DEFAULT_WHERE` also applies to `change()` and `remove()`, so with the definition above `Employees::remove()` never touches rows that are marked as deleted.
@@ -397,7 +397,7 @@ Joined tables share the namespace of the query, so a column that exists in sever
 
 ## Concealing columns
 
-`concealing()` removes keys from the result rows, and `revealing()` restores keys that `DEFAULT_CONCEALING` removes. Keys may be paths into JSON columns, such as `$.settings.secret`.
+`DEFAULT_CONCEALING` lists keys that are removed from every result row, `concealing()` removes more keys, and `revealing()` restores keys that are concealed by default. A key is either a column name, or a path into a JSON value such as `$.settings.secret`.
 
 ```php
 class Employees extends AbstractRelentity
@@ -411,7 +411,48 @@ Employees::fetch()->revealing('passwordHash')->asTable();   // with passwordHash
 Employees::fetch()->concealing('email')->asTable();         // without passwordHash and email
 ```
 
-Each of the following overrides the ones before it, whatever the order of the calls: `DEFAULT_CONCEALING`, `revealing()`, `concealing()`. `getConcealedColumns()` returns the resulting list.
+Each of the following overrides the ones before it, whatever the order of the calls: `DEFAULT_CONCEALING`, `revealing()`, `concealing()`. So `revealing()` undoes a default, and `concealing()` always wins.
+
+Concealment applies to the rows returned by `fetch()`, and to the rows returned by `add()`, `change()` and `remove()` through `RETURNING`. It does not apply to `count()`, which returns a number.
+
+### Concealing related rows
+
+The concealment of an entity applies wherever its rows are returned, including the rows of relations at any depth:
+
+```php
+Employees::fetch()->with('manager', 'reports')->asTable();
+// passwordHash is removed from each employee, from their manager, and from each of their reports
+```
+
+The source of a relation can override the concealment of the related rows for a single query, using paths that start with the relation alias:
+
+```php
+Employees::fetch()
+    ->with('manager', 'reports')
+    ->revealing('$.manager.passwordHash')     // revealed for the manager only
+    ->concealing('$.reports.email');          // concealed for each of the reports
+```
+
+A path into a list of related rows, such as `$.reports.email`, applies to each of them. Relations declared with a customized target follow that target, so `Many::of(Employees::fetch()->revealing('passwordHash'))` returns related rows with `passwordHash`.
+
+`getConcealedColumns()` returns the resulting list, relation paths included:
+
+```php
+Employees::fetch()->with('manager', 'reports')->getConcealedColumns();
+// ['passwordHash', '$.manager.passwordHash', '$.reports.passwordHash']
+```
+
+### How concealment works
+
+Concealed keys are removed by f4php/db after the statement is executed, before any hook observes the result. Concealed values are therefore still selected and transferred from the database, but they never reach the code that receives the result.
+
+With `DB_STRICT_CONCEAL` enabled, every concealed key must be present in every row, so a misspelled key throws a `ConcealedColumnNotFoundException` instead of silently exposing the column. Related rows that are `null`, and empty lists of related rows, are skipped. If a statement selects only some of the columns, with `selecting()`, `DEFAULT_SELECT` or a custom `RETURNING`, include the concealed columns or reveal them:
+
+```php
+Employees::fetch()->selecting(['employeeUUID', 'name'])->revealing('passwordHash')->asTable();
+```
+
+Concealed keys are removed before `asValue()` picks its value, so pass it a column name rather than an index: with an index, the position of every column after a concealed one shifts by one.
 
 ## Reference
 
@@ -440,8 +481,8 @@ All of them return the entity.
 | `with(...$relations)` | `fetch()` | includes relations by alias, or `['alias' => callable]` |
 | `without(...$relations)` | `fetch()` | excludes relations by alias, default ones included |
 | `joinedWith($table, $condition, $method = 'join')` | `fetch()` | joins a table, see [Joining tables](#joining-tables) |
-| `concealing(...$columns)` | all | conceals result keys or paths |
-| `revealing(...$columns)` | all | reveals keys or paths concealed by default |
+| `concealing(...$columns)` | all except `count()` | conceals result keys or paths, `$.alias.column` for related rows |
+| `revealing(...$columns)` | all except `count()` | reveals keys or paths concealed by default |
 
 `selecting()`, `with()`, `without()` and `joinedWith()` throw an `InvalidArgumentException` for any other statement, and so do `sortedBy()`, `limitedTo()` and `skipping()` for `count()`, and `limitedTo()` and `skipping()` for `remove()`.
 
@@ -457,6 +498,7 @@ All of them return the entity.
 | `execute()` | `void` | executes the statement and discards the result |
 | `asQuery($columns = null, ?string $returning = null)` | `QueryBuilderInterface` | builds the statement without executing it |
 | `asSQL()` | `string` | builds the statement and returns its SQL |
+| `getConcealedColumns()` | `list<string>` | the keys and paths that will be concealed, relation paths included |
 
 ### Relations
 
