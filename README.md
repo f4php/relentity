@@ -20,6 +20,7 @@ Relations are compiled into `LEFT JOIN LATERAL` subqueries that return related r
   - [Completely custom conditions](#completely-custom-conditions)
 - [Joining tables](#joining-tables)
 - [Concealing columns](#concealing-columns)
+- [Limitations](#limitations)
 - [Reference](#reference)
 
 ## Installation
@@ -135,7 +136,7 @@ Employees::fetch()->enabled()->asSQL();
 | `DEFAULT_RETURNING` | `'*'` | `add()`, `change()`, `remove()` | `asQuery(returning: ...)`; `null` means no `RETURNING` |
 | `DEFAULT_RELATIONS` | none | `fetch()` | extended by `with()`, reduced by `without()` |
 | `DEFAULT_CONCEALING` | none | `fetch()`, and `RETURNING` of `add()`, `change()`, `remove()` | extended by `concealing()`, reduced by `revealing()`, see [Concealing columns](#concealing-columns) |
-| `DEFAULT_ADAPTER` | the configured adapter | all | a class name implementing `F4\DB\Adapter\AdapterInterface` |
+| `DEFAULT_ADAPTER` | `DB_ADAPTER_CLASS` of `F4\Config` | all | a class name implementing `F4\DB\Adapter\AdapterInterface`, instantiated without arguments for every statement |
 
 `DEFAULT_WHERE` also applies to `change()` and `remove()`, so with the definition above `Employees::remove()` never touches rows that are marked as deleted.
 
@@ -197,6 +198,8 @@ Every row then contains one additional key per relation, already decoded from JS
     ],
 ]
 ```
+
+Each relation adds one column, named after its alias, to the selected columns. Without `DEFAULT_SELECT`, an entity selects all columns of its own table, `"employee".*`. Avoid a bare `*` together with relations: it also returns an internal `___relation_rows___` column of every relation.
 
 The entity that declares a relation is its **source**, the related entity is its **target**. The closure is called with the source instance whenever the relation is used, so a relation is built anew for every query. PHP does not allow arrow functions (`fn`) in constants, so use `static function` or a [first-class callable](#customizing-the-target).
 
@@ -452,7 +455,7 @@ Such targets are built as declared, so planning them is up to you: a target star
 
 Any `ConditionCollection` can serve as the condition of a relation, or as either condition of `via()`. It replaces the generated condition completely, and may contain any SQL that is valid in a `WHERE` clause.
 
-Inside a relation, the current row of the source is available under the alias `Many::SOURCE_ALIAS` (the same as `One::SOURCE_ALIAS`), and it contains **all** columns of the source table, not only those that are selected. The target is referred to by its table name. Always qualify source columns with the alias: unqualified columns refer to the target.
+Inside a relation, the current row of the source is available under the alias `Many::SOURCE_ALIAS` (the same as `One::SOURCE_ALIAS`), and it contains **all** columns of the source table, not only those that are selected. Columns of tables added with [`joinedWith()`](#joining-tables) are not part of it, and are referred to by their table name. The target is referred to by its table name, and so is a link table in the conditions of `via()`. Always qualify source columns with the alias: unqualified columns refer to the target.
 
 ```php
 use F4\DB;
@@ -531,7 +534,7 @@ The third argument is the name of the join method of f4php/db, `join` by default
 | `join`, `innerJoin`, `leftJoin`, `leftOuterJoin`, `rightJoin`, `rightOuterJoin`, `fullOuterJoin`, `joinLateral`, `innerJoinLateral`, `leftJoinLateral` | required |
 | `crossJoin`, `crossJoinLateral`, `naturalJoin`, `naturalLeftOuterJoin`, `naturalRightOuterJoin` | not allowed |
 
-Pass the method by name when there is no condition:
+An empty array or an empty string counts as a missing condition. Pass the method by name when there is no condition:
 
 ```php
 Employees::fetch()->joinedWith('employee_project', method: 'naturalJoin');
@@ -557,6 +560,8 @@ Employees::fetch()
 //   SELECT "date" FROM "timesheet" WHERE "timesheet"."employeeUUID" = "employee"."employeeUUID" ORDER BY "date" DESC LIMIT 1
 // ) AS "latest" ...
 ```
+
+`crossJoinLateral` drops the employees for whom the subquery returns no row. To keep them, use `leftJoinLateral`, which requires a condition: `[new Fragment('true')]` joins every row, as `ON true`.
 
 Joined tables share the namespace of the query, so a column that exists in several tables must be qualified, in `selecting()`, `matching()` and `sortedBy()` as well as in `DEFAULT_SELECT` and `DEFAULT_WHERE`. That is why the second example selects `employee.*`: both tables have a `name` column. Joined rows multiply the rows of the entity when they are not unique for each of them.
 
@@ -611,7 +616,7 @@ Employees::fetch()->with('manager', 'reports')->getConcealedColumns();
 
 Concealed keys are removed by f4php/db after the statement is executed, before any hook observes the result. Concealed values are therefore still selected and transferred from the database, but they never reach the code that receives the result.
 
-This includes statements executed in a `DBTransaction` (f4php/db 0.4.8 or later), where each statement keeps its own concealment:
+This includes statements executed in a `DBTransaction`, where each statement keeps its own concealment. All statements of a transaction run through the adapter of the transaction, not through the `DEFAULT_ADAPTER` of their entities:
 
 ```php
 use F4\DBTransaction;
@@ -638,6 +643,14 @@ Employees::change(['enabled' => false])->matching(['employeeUUID' => $uuid])->as
 When a write returns only some of the columns, reveal the concealed ones that it does not return. Alternatively, execute it in a `DBTransaction`, where the exception rolls the whole transaction back.
 
 Concealed keys are removed before `asValue()` picks its value, so pass it a column name rather than an index: with an index, the position of every column after a concealed one shifts by one.
+
+## Limitations
+
+Relations refer to tables by their names, so a few combinations of names produce invalid or wrong SQL:
+
+- **Schema-qualified table names** are not supported: `TABLE_NAME = 'hr.employee'` is quoted as a single name. Select the schema with `DB_SCHEMA` of `F4\Config` instead.
+- **A relation alias** must differ from the table name of the entity, from tables added with `joinedWith()`, and from the selected columns. Otherwise PostgreSQL rejects the query (`table name "employee" specified more than once`), or f4php/db rejects the result (`Duplicate result column name`).
+- **A link table** of `via()` must differ from the table of the target. A table that links its own rows, such as a `node` table with a `parentId` column, is related with a plain condition, e.g. `Many::of(Nodes::class, ['nodeId' => 'parentId'])`.
 
 ## Reference
 
@@ -671,6 +684,8 @@ All of them return the entity.
 
 `selecting()`, `with()`, `without()` and `joinedWith()` throw an `InvalidArgumentException` for any other statement, and so do `sortedBy()`, `limitedTo()` and `skipping()` for `count()`, and `limitedTo()` and `skipping()` for `remove()`.
 
+The other combinations are accepted, but have no effect: `change()` ignores `sortedBy()`, `limitedTo()` and `skipping()`, `remove()` ignores `sortedBy()`, `add()` ignores `matching()`, `sortedBy()`, `limitedTo()` and `skipping()`, and `unlimited()` has no effect on any statement other than `fetch()`. In particular, `change($changes)->matching($filters)->limitedTo(1)` changes **every** row that matches `$filters`: narrow the rows with `matching()` instead, e.g. by the primary key.
+
 `matching()`, `selecting()`, `sortedBy()`, `with()`, `without()`, `concealing()` and `revealing()` reject named arguments, since PHP would otherwise accept any name: `matching(status: [...])` would silently filter by a `status` column.
 
 ### Ending a statement
@@ -699,6 +714,6 @@ A condition is one of:
 | Condition | Meaning |
 |---|---|
 | `null` | the [default](#join-conditions) |
-| `'column'` | the same column on both sides |
-| `['sourceColumn' => 'targetColumn']` | differently named columns, the source side first |
+| `'column'` | the same column on both sides, a non-empty name |
+| `['sourceColumn' => 'targetColumn']` | differently named columns, the source side first, both non-empty names |
 | `ConditionCollection` | a [custom condition](#completely-custom-conditions), used as is |
