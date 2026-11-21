@@ -32,7 +32,6 @@ is_subclass_of
 
 abstract class AbstractRelation implements RelationInterface
 {
-
     public const string RELATION_ROWS_ALIAS = '___relation_rows___'; // unique enough to avoid conflict with actual column names
     protected const string SUBQUERY_ALIAS = '___subquery___'; // unique enough to avoid conflict with actual table names
     public const string SOURCE_ALIAS = '___source___'; // unique enough to avoid conflict with actual table names
@@ -58,9 +57,9 @@ abstract class AbstractRelation implements RelationInterface
         };
         $this->relationCondition = $condition;
     }
-    public static function of(string|RelentityInterface $entity, null|string|array|ConditionCollection $condition = null): static
+    public static function of(string|RelentityInterface $target, null|string|array|ConditionCollection $condition = null): static
     {
-        return new static($entity, $condition);
+        return new static($target, $condition);
     }
     public function getConcealedPaths(string $alias): array
     {

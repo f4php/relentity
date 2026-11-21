@@ -13,7 +13,7 @@ use F4\Relentity\{
 };
 
 interface RelationInterface {
-    public static function of(string|RelentityInterface $relentity, null|string|array|ConditionCollection $condition = null): static;
+    public static function of(string|RelentityInterface $target, null|string|array|ConditionCollection $condition = null): static;
     public function appendJoinExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface;
     public function appendSelectExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface;
     public function getConcealedPaths(string $alias): array;
