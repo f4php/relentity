@@ -175,7 +175,7 @@ class AbstractRelentity implements RelentityInterface
         }
         return $relations;
     }
-    public function joinedWith(string|array $table, string|array|ConditionCollection $condition, string $method = 'join'): static
+    public function joinedWith(string|array $table, null|string|array|ConditionCollection $condition = null, string $method = 'join'): static
     {
         if (
             !in_array($this->actionType, [
@@ -184,6 +184,7 @@ class AbstractRelentity implements RelentityInterface
         ) {
             throw new InvalidArgumentException(__FUNCTION__ . "() is not supported for intended action");
         }
+        $condition = ($condition === [] || $condition === '') ? null : $condition;
         if (
             !in_array($method, [
                 'crossJoin',
@@ -204,6 +205,16 @@ class AbstractRelentity implements RelentityInterface
             ], strict: true)
         ) {
             throw new InvalidArgumentException("Unsupported join method {$method}");
+        }
+        $withoutCondition = [
+            'crossJoin', 'crossJoinLateral', 
+            'naturalJoin', 'naturalLeftOuterJoin', 'naturalRightOuterJoin'
+        ];
+        if (in_array($method, $withoutCondition, strict: true) !== ($condition === null)) {
+            throw new InvalidArgumentException(match ($condition === null) {
+                true => "{$method}() requires a condition",
+                default => "{$method}() does not accept a condition",
+            });
         }
         $this->joins[] = [
             'table' => $table,
@@ -231,7 +242,7 @@ class AbstractRelentity implements RelentityInterface
                         $query->$method($join['table']);
                         if (is_string($join['condition'])) {
                             $query->using($join['condition']);
-                        } else {
+                        } elseif (!empty($join['condition'])) {
                             $query->on($join['condition']);
                         }
                     }

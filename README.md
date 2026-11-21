@@ -14,6 +14,7 @@ Relations are compiled into `LEFT JOIN LATERAL` subqueries that return related r
   - [Link tables](#link-tables)
   - [Customizing the target](#customizing-the-target)
   - [Choosing relations per query](#choosing-relations-per-query)
+  - [Relations of related rows](#relations-of-related-rows)
   - [Completely custom conditions](#completely-custom-conditions)
 - [Joining tables](#joining-tables)
 - [Concealing columns](#concealing-columns)
@@ -94,7 +95,7 @@ Employees::fetch()->enabled()->asSQL();
 
 `DEFAULT_WHERE` also applies to `change()` and `remove()`, so with the definition above `Employees::remove()` never touches rows that are marked as deleted.
 
-When an entity is the target of a relation, its defaults apply to the related rows as well.
+When an entity is the target of a relation, its defaults apply to the related rows as well, except `DEFAULT_RELATIONS`, see [Relations of related rows](#relations-of-related-rows).
 
 ## Relations
 
@@ -315,6 +316,35 @@ Employees::fetch()->with([
 ]);
 ```
 
+### Relations of related rows
+
+`DEFAULT_RELATIONS` apply to the statements you start, not to related rows. A relation whose target is a class, such as `One::of(Employees::class)`, returns related rows without the default relations of that class, so a relation to the entity's own table can be listed in `DEFAULT_RELATIONS`:
+
+```php
+class Employees extends AbstractRelentity
+{
+    // ...
+    public const array DEFAULT_RELATIONS = ['manager'];
+    public const array RELATIONS = [
+        'manager' => static function (): RelationInterface {
+            return One::of(Employees::class, ['managerUUID' => 'employeeUUID']);
+        },
+    ];
+}
+
+Employees::fetch()->asTable();   // each employee with their manager, the manager without a manager of their own
+```
+
+To include relations in related rows, start the target with `fetch()`: it then has its default relations, and any relations added with `with()`:
+
+```php
+'projectsWithClients' => static function (): RelationInterface {
+    return ManyToMany::of(Projects::fetch()->with('client'))->via('employee_project');
+},
+```
+
+Such targets are built as declared, so planning them is up to you: a target started with `fetch()` whose default relations lead back to the same relation recurses until PHP runs out of stack. Exclude the relation on the target to stop it, e.g. `One::of(Employees::fetch()->without('manager'), ...)`.
+
 ### Completely custom conditions
 
 Any `ConditionCollection` can serve as the condition of a relation, or as either condition of `via()`. It replaces the generated condition completely, and may contain any SQL that is valid in a `WHERE` clause.
@@ -391,7 +421,39 @@ Employees::fetch()
     ->matching(['department.name' => 'R&D']);
 ```
 
-The third argument is the name of the join method of f4php/db, `join` by default, e.g. `leftJoin` or `innerJoinLateral`.
+The third argument is the name of the join method of f4php/db, `join` by default. The methods differ in whether they take a condition, and `joinedWith()` throws an `InvalidArgumentException` when a condition is missing or not allowed:
+
+| Methods | Condition |
+|---|---|
+| `join`, `innerJoin`, `leftJoin`, `leftOuterJoin`, `rightJoin`, `rightOuterJoin`, `fullOuterJoin`, `joinLateral`, `innerJoinLateral`, `leftJoinLateral` | required |
+| `crossJoin`, `crossJoinLateral`, `naturalJoin`, `naturalLeftOuterJoin`, `naturalRightOuterJoin` | not allowed |
+
+Pass the method by name when there is no condition:
+
+```php
+Employees::fetch()->joinedWith('employee_project', method: 'naturalJoin');
+// SELECT ... FROM "employee" NATURAL JOIN "employee_project" ...
+```
+
+A natural join uses every column that both tables have in common, so it silently changes when a column is added to either table. Prefer an explicit condition.
+
+The lateral methods join a subquery, which can refer to the columns of the entity. Pass it with its alias as the key:
+
+```php
+// employees with at least one timesheet, with the date of the latest one
+Employees::fetch()
+    ->selecting('employee.*', 'latest.date')
+    ->joinedWith([
+        'latest' => DB::select('date')
+            ->from('timesheet')
+            ->where([new Fragment('"timesheet"."employeeUUID" = "employee"."employeeUUID"')])
+            ->order(['date' => 'desc'])
+            ->limit(1),
+    ], method: 'crossJoinLateral');
+// SELECT employee.*, "latest"."date" FROM "employee" CROSS JOIN LATERAL (
+//   SELECT "date" FROM "timesheet" WHERE "timesheet"."employeeUUID" = "employee"."employeeUUID" ORDER BY "date" DESC LIMIT 1
+// ) AS "latest" ...
+```
 
 Joined tables share the namespace of the query, so a column that exists in several tables must be qualified, in `selecting()`, `matching()` and `sortedBy()` as well as in `DEFAULT_SELECT` and `DEFAULT_WHERE`. That is why the second example selects `employee.*`: both tables have a `name` column. Joined rows multiply the rows of the entity when they are not unique for each of them.
 
@@ -480,7 +542,7 @@ All of them return the entity.
 | `skipping(int $rows)` | `fetch()` | sets the offset |
 | `with(...$relations)` | `fetch()` | includes relations by alias, or `['alias' => callable]` |
 | `without(...$relations)` | `fetch()` | excludes relations by alias, default ones included |
-| `joinedWith($table, $condition, $method = 'join')` | `fetch()` | joins a table, see [Joining tables](#joining-tables) |
+| `joinedWith($table, $condition = null, $method = 'join')` | `fetch()` | joins a table or a subquery, see [Joining tables](#joining-tables) |
 | `concealing(...$columns)` | all except `count()` | conceals result keys or paths, `$.alias.column` for related rows |
 | `revealing(...$columns)` | all except `count()` | reveals keys or paths concealed by default |
 

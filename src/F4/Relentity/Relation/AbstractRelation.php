@@ -53,7 +53,7 @@ abstract class AbstractRelation implements RelationInterface
                 },
             default => match (is_subclass_of($entity, RelentityInterface::class)) {
                     false => throw new InvalidArgumentException("Relation must be a " . RelentityInterface::class . ' class'),
-                    default => $entity::fetch(),
+                    default => $entity::fetch()->without(...$entity::DEFAULT_RELATIONS), // prevent recursion
                 },
         };
         $this->relationCondition = $condition;

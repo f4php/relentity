@@ -35,7 +35,7 @@ interface RelentityInterface {
     public function getConcealedColumns(): array;
     public function getPrimaryKey(): string;
     public function getTableName(): string;
-    public function joinedWith(string|array $table, string|array|ConditionCollection $condition, string $method='join'): static;
+    public function joinedWith(string|array $table, null|string|array|ConditionCollection $condition = null, string $method='join'): static;
     public function limitedTo(?int $rows, ?int $skipping = null): static;
     public function matching(array|ConditionCollection ...$filters): static;
     public function revealing(string|array ...$columns): static;
