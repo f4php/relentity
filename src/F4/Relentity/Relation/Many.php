@@ -23,18 +23,16 @@ use F4\Relentity\{
 
 class Many extends AbstractRelation implements RelationInterface {
 
-    protected string $viaTable;
-    protected string|array|ConditionCollection $viaCondition;
-
-    public function via(string|RelentityInterface $tableOrRelentity, string|array|ConditionCollection $condition): static {
-        if($this->target->getActionType() !== ActionType::Fetch) {
-            throw new InvalidArgumentException(__FUNCTION__. '() is not supported for action type ' . $this->target->getActionType()->name);
+    protected string|RelentityInterface $viaEntity;
+    protected null|string|array|ConditionCollection $viaSourceCondition;
+    protected null|string|array|ConditionCollection $viaTargetCondition;
+    public function via(string|RelentityInterface $entity, null|string|array|ConditionCollection $sourceCondition = null, null|string|array|ConditionCollection $targetCondition = null): static {
+        if($entity instanceof RelentityInterface && $entity->getActionType() !== ActionType::Fetch) {
+            throw new InvalidArgumentException(__FUNCTION__ . '() requires Relentity objects to have Fetch action type');
         }
-        $this->viaTable = match($tableOrRelentity instanceof RelentityInterface) {
-            true => $tableOrRelentity->getTableName(),
-            default => $tableOrRelentity,
-        };
-        $this->viaCondition = $condition;
+        $this->viaEntity =  $entity;
+        $this->viaSourceCondition = $sourceCondition;
+        $this->viaTargetCondition = $targetCondition;
         return $this;
     }
 
@@ -43,42 +41,54 @@ class Many extends AbstractRelation implements RelationInterface {
             throw new RuntimeException('Cannot determine source relentity, a withSource() call on relation instance is required');
         }
         $target = clone ($this->target);
-        if(!empty($this->viaTable) && !empty($this->viaCondition)) {
-            $target->joinedWith(
-                table: $this->viaTable,
-                condition: $this->viaCondition,
+        if(!empty($this->viaEntity)) {
+            $viaTable = $this->viaEntity instanceof RelentityInterface ? $this->viaEntity->getTableName() : $this->viaEntity;
+            $linkCondition = ConditionCollection::of(
+                static::buildJoinCondition(                        // source.col = link.col
+                    condition: $this->viaSourceCondition,
+                    defaultSourceColumn: $this->source->getPrimaryKey(),
+                    defaultTargetColumn: $this->source->getPrimaryKey(),
+                    sourceAlias: static::SOURCE_ALIAS,
+                    targetAlias: $viaTable,
+                ),
+                static::buildJoinCondition(                        // link.col = target.col
+                    condition: $this->viaTargetCondition,
+                    defaultSourceColumn: $target->getPrimaryKey(),
+                    defaultTargetColumn: $target->getPrimaryKey(),
+                    sourceAlias: $viaTable,
+                    targetAlias: $target->getTableName(),
+                ),
             );
+            $target->matching(['EXISTS({#::#})' => match($this->viaEntity instanceof RelentityInterface) {
+                true => (clone $this->viaEntity)->unlimited()->matching($linkCondition)->asQuery('1'),
+                default => DB::select(1)->from($this->viaEntity)->where($linkCondition),
+            }]);
         }
-        return $query
-            ->leftJoinLateral(
-                new Fragment('({#::#}) AS {#::#}', [
-                    DB::select(match($this->target->getActionType() === ActionType::Count) {
-                        true => new Fragment('{#::#}.{#::#} AS {#::#}', [
-                            $query->escapeIdentifier(self::SUBQUERY_ALIAS),
-                            $query->escapeIdentifier(RelentityInterface::COUNT_ALIAS),
-                            $query->escapeIdentifier(static::RELATION_ROWS_ALIAS),
-                        ]),
-                        default => new Fragment('jsonb_agg(to_jsonb({#::#}.*)) AS {#::#}', [
-                            $query->escapeIdentifier(self::SUBQUERY_ALIAS),
-                            $query->escapeIdentifier(static::RELATION_ROWS_ALIAS),
-                        ])
-                    })
-                        ->from([
-                            self::SUBQUERY_ALIAS => $target
-                                ->matching([
-                                    // TODO: complex and custom join statements
-                                    new Fragment('{#::#}.{#::#} = {#::#}.{#::#}', [
-                                        $query->escapeIdentifier($this->source->getTableName()),
-                                        $query->escapeIdentifier($this->sourceKey ?? $this->source->getPrimaryKey()),
-                                        $query->escapeIdentifier($target->getTableName()),
-                                        $query->escapeIdentifier($this->targetKey ?? $this->source->getPrimaryKey()),
-                                    ])
-                                ])
-                                ->asQuery(),
-                        ]),
-                    $query->escapeIdentifier($alias),
+        else {
+            $target->matching(static::buildJoinCondition(
+                condition: $this->relationCondition,
+                defaultSourceColumn: $this->source->getPrimaryKey(),
+                defaultTargetColumn: $this->source->getPrimaryKey(),
+                sourceAlias: static::SOURCE_ALIAS,
+                targetAlias: $target->getTableName(),
+            ));
+        }
+        return static::buildJoinLateralQuery(
+            query: $query,
+            alias: $alias,
+            sourceTableName: $this->source->getTableName(),
+            rows: match($target->getActionType() === ActionType::Count) { 
+                true => new Fragment('{#::#}.{#::#} AS {#::#}', [
+                    DB::escapeIdentifier(self::SUBQUERY_ALIAS),
+                    DB::escapeIdentifier(RelentityInterface::COUNT_ALIAS),
+                    DB::escapeIdentifier(static::RELATION_ROWS_ALIAS),
+                ]),
+                default => new Fragment('jsonb_agg(to_jsonb({#::#}.*)) AS {#::#}', [
+                    DB::escapeIdentifier(self::SUBQUERY_ALIAS),
+                    DB::escapeIdentifier(static::RELATION_ROWS_ALIAS),
                 ])
-            )
-            ->on('true');
+            },
+            targetQuery: $target->asQuery(),
+        );
     }
 }

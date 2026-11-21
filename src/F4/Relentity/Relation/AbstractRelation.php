@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace F4\Relentity\Relation;
 
-use Closure;
 use InvalidArgumentException;
 
 use F4\DB;
 use F4\DB\{
+    ConditionCollection,
     Fragment,
     QueryBuilderInterface,
     Concealment\ConcealmentPath,
@@ -20,14 +20,22 @@ use F4\Relentity\{
 };
 
 use function
-    in_array,
-    is_subclass_of
+array_is_list,
+array_key_first,
+count,
+current,
+in_array,
+is_array,
+is_string,
+is_subclass_of
 ;
 
-abstract class AbstractRelation implements RelationInterface {
+abstract class AbstractRelation implements RelationInterface
+{
 
     public const string RELATION_ROWS_ALIAS = '___relation_rows___'; // unique enough to avoid conflict with actual column names
     protected const string SUBQUERY_ALIAS = '___subquery___'; // unique enough to avoid conflict with actual table names
+    public const string SOURCE_ALIAS = '___source___'; // unique enough to avoid conflict with actual table names
     protected const array SUPPORTED_ACTIONS = [
         ActionType::Count,
         ActionType::Fetch,
@@ -35,50 +43,92 @@ abstract class AbstractRelation implements RelationInterface {
 
     protected RelentityInterface $source;
     protected RelentityInterface $target;
-    protected string $sourceKey;
-    protected string $targetKey;
-
-    final protected function __construct(string|RelentityInterface $relentity) {
-        $this->target = match($relentity instanceof RelentityInterface) {
-            true => match(in_array($actionType = $relentity->getActionType(), static::SUPPORTED_ACTIONS, strict: true)) {
-                false => throw new InvalidArgumentException(static::class . " does not support {$actionType->name} action"),
-                default => $relentity,
-            } ,
-            default => match(is_subclass_of($relentity, RelentityInterface::class)) {
-                false => throw new InvalidArgumentException("Relation must be a " . RelentityInterface::class . ' class'),
-                default => $relentity::fetch(),
-            },
+    protected null|string|array|ConditionCollection $relationCondition;
+    final protected function __construct(string|RelentityInterface $entity, null|string|array|ConditionCollection $condition = null)
+    {
+        $this->target = match ($entity instanceof RelentityInterface) {
+            true => match (in_array($actionType = $entity->getActionType(), static::SUPPORTED_ACTIONS, strict: true)) {
+                    false => throw new InvalidArgumentException(static::class . " does not support {$actionType->name} action"),
+                    default => $entity,
+                },
+            default => match (is_subclass_of($entity, RelentityInterface::class)) {
+                    false => throw new InvalidArgumentException("Relation must be a " . RelentityInterface::class . ' class'),
+                    default => $entity::fetch(),
+                },
         };
+        $this->relationCondition = $condition;
     }
-
-    public static function of(string|RelentityInterface $relentity): static {
-        return new static($relentity);
+    public static function of(string|RelentityInterface $entity, null|string|array|ConditionCollection $condition = null): static
+    {
+        return new static($entity, $condition);
     }
-
-    public function withSource(RelentityInterface $relentity): static {
+    public function withSource(RelentityInterface $relentity): static
+    {
         $this->source = $relentity;
         return $this;
     }
-
-    public function linkedBy(string $sourceKey, ?string $targetKey = null): static {
-        $this->sourceKey = $sourceKey;
-        if($targetKey !== null) {
-            $this->targetKey = $targetKey;
-        }
-        return $this;
-    }
-
-    public function appendSelectExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface {
+    abstract public function appendJoinExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface;
+    public function appendSelectExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface
+    {
         return $query->select(
             new Fragment('{#::#}.{#::#} AS {#::#}', [
                 $query->escapeIdentifier($alias),
                 $query->escapeIdentifier(static::RELATION_ROWS_ALIAS),
                 $query->escapeIdentifier($alias),
-            ])
+            ]),
         );
     }
-    abstract public function appendJoinExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface;
+    final protected static function buildJoinCondition(
+        null|string|array|ConditionCollection $condition,
+        string $defaultSourceColumn,
+        string $defaultTargetColumn,
+        ?string $sourceAlias = null,
+        ?string $targetAlias = null,
+    ): ConditionCollection {
+        if ($condition instanceof ConditionCollection) {
+            return $condition;
+        }
+        if (is_array($condition) && (count($condition) !== 1 || array_is_list($condition) || !is_string(current($condition)))) {
+            throw new InvalidArgumentException('Condition as array must contain exactly one array key with one value');
+        }
+        [$sourceColumn, $targetColumn] = match (true) {
+            is_array($condition) => [array_key_first($condition), current($condition)],
+            $condition === null => [$defaultSourceColumn, $defaultTargetColumn],
+            default => [$condition, $condition],
+        };
+        $columnFn = fn(string $column, ?string $alias): Fragment => match (empty($alias)) {
+            true => new Fragment('{#::#}', [DB::escapeIdentifier($column)]),
+            default => new Fragment('{#::#}.{#::#}', [DB::escapeIdentifier($alias), DB::escapeIdentifier($column)]),
+        };
+        return ConditionCollection::of(new Fragment('{#::#} = {#::#}', [
+            $columnFn($sourceColumn, $sourceAlias),
+            $columnFn($targetColumn, $targetAlias),
+        ]));
+    }
 
+    final protected static function buildJoinLateralQuery(
+        QueryBuilderInterface $query, 
+        string $sourceTableName, string $alias, 
+        Fragment $rows, 
+        QueryBuilderInterface $targetQuery
+    ): QueryBuilderInterface
+    {
+        return $query
+            ->leftJoinLateral(new Fragment('({#::#}) AS {#::#}', [
+                DB::select($rows)
+                    ->from([
+                        static::SOURCE_ALIAS => DB::select(new Fragment('{#::#}.*', [
+                            DB::escapeIdentifier($sourceTableName),
+                        ]))
+                    ])
+                    ->crossJoinLateral(new Fragment('({#::#}) AS {#::#}', [
+                        $targetQuery,
+                        DB::escapeIdentifier(static::SUBQUERY_ALIAS),
+                    ])),
+                DB::escapeIdentifier($alias),
+            ]))
+            ->on('true');
+    }
 
     // /**
     //  * Name of the only column of the joined subquery, selected under the relation alias.

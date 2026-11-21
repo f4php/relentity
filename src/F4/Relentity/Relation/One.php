@@ -29,30 +29,24 @@ class One extends AbstractRelation implements RelationInterface {
             throw new RuntimeException('Cannot determine source relentity, a withSource() call on relation instance is required');
         }
         $target = clone ($this->target);
-        return $query
-            ->leftJoinLateral(
-                new Fragment('({#::#}) AS {#::#}', [
-                    DB::select(new Fragment('to_jsonb({#::#}.*) AS {#::#}', [
-                        $query->escapeIdentifier(self::SUBQUERY_ALIAS),
-                        $query->escapeIdentifier(static::RELATION_ROWS_ALIAS),
-                    ]))
-                        ->from([
-                            self::SUBQUERY_ALIAS => $target
-                                ->matching([
-                                    // TODO: complex and custom join statements
-                                    new Fragment('{#::#}.{#::#} = {#::#}.{#::#}', [
-                                        $query->escapeIdentifier($this->source->getTableName()),
-                                        $query->escapeIdentifier($this->sourceKey ?? $target->getPrimaryKey()),
-                                        $query->escapeIdentifier($target->getTableName()),
-                                        $query->escapeIdentifier($this->targetKey ?? $target->getPrimaryKey()),
-                                    ])
-                                ])
-                                ->limitedTo(1)
-                                ->asQuery(),
-                        ]),
-                    $query->escapeIdentifier($alias),
-                ])
-            )
-            ->on('true');
+        return static::buildJoinLateralQuery(
+            query: $query,
+            alias: $alias,
+            sourceTableName: $this->source->getTableName(),
+            rows: new Fragment('to_jsonb({#::#}.*) AS {#::#}', [
+                DB::escapeIdentifier(self::SUBQUERY_ALIAS),
+                DB::escapeIdentifier(static::RELATION_ROWS_ALIAS),
+            ]),
+            targetQuery: $target
+                ->matching(static::buildJoinCondition(
+                    condition: $this->relationCondition,
+                    defaultSourceColumn: $target->getPrimaryKey(),
+                    defaultTargetColumn: $target->getPrimaryKey(),
+                    sourceAlias: static::SOURCE_ALIAS,
+                    targetAlias: $target->getTableName(),
+                ))
+                ->limitedTo(1)
+                ->asQuery(),
+        );
     }
 }

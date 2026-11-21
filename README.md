@@ -1,326 +1,477 @@
 # Overview
 
-**Relentity** is an entity-focused layer on top of [f4php/db](https://github.com/f4php/db), and a core package of [F4](https://github.com/f4php/f4), a lightweight web development framework.
+**Relentity** is an entity-focused layer on top of the [f4php/db](https://github.com/f4php/db) query builder, and a core package of [F4](https://github.com/f4php/f4), a lightweight web development framework.
 
-Relentity repositories do not replace the query builder. They describe entities (table, key, sensitive columns, relations) and compile entity-aware statements into ordinary `QueryBuilderInterface` instances. You can inspect those statements, execute them, extend them or add them to a `DBTransaction`.
+An entity class describes a table: its primary key, default filters, ordering and limit, and its relations to other entities. Every statement built from it compiles to an ordinary f4php/db `QueryBuilderInterface`, so you can execute it, inspect its SQL, extend it, or add it to a transaction.
+
+Relations are compiled into `LEFT JOIN LATERAL` subqueries that return related rows as JSON, so a single query returns each row together with its related data, and joining relations never multiplies the rows of the main entity.
+
+- [Quick start](#quick-start)
+- [Entity defaults](#entity-defaults)
+- [Relations](#relations)
+  - [Declaring relations](#declaring-relations)
+  - [Join conditions](#join-conditions)
+  - [Link tables](#link-tables)
+  - [Customizing the target](#customizing-the-target)
+  - [Choosing relations per query](#choosing-relations-per-query)
+  - [Completely custom conditions](#completely-custom-conditions)
+- [Joining tables](#joining-tables)
+- [Concealing columns](#concealing-columns)
+- [Reference](#reference)
 
 ## Quick start
 
-Boilerplate code is minimal, consider this simple example of a single entity `Files` class that has no complex features or relations:
+An entity needs a table name and a primary key:
 
 ```php
+use F4\Relentity\AbstractRelentity;
 
-use F4\Relentity\{
-  AbstractRelentity,
-  RelentityInterface,
-};
-
-class Files extends AbstractRelentity implements RelentityInterface {
-  public const string TABLE_NAME = 'file';      // define primary table name
-  public const string PRIMARY_KEY = 'fileUUID'; // and primary key
-};
-
-$files = Files::fetch()->matching(['name' => $name]);    // returns RelentityInterface-compatible instance
-
-$files->asTable();  // shortcut for QueryBuilderInterface tail method, effectively same as ->asQuery()->asTable()
-$files->asCount();  // for example, this executes the query and returns an integer
-
-$files->asQuery();  // returns QueryBuilderInterface, nothing executed
+class Employees extends AbstractRelentity
+{
+    public const string TABLE_NAME = 'employee';
+    public const string PRIMARY_KEY = 'employeeUUID';
+}
 ```
 
-## Advanced use
-
-Some entities are more complex and may have relations to other entities, here's an example of `Employees` class:
+Every statement starts with a static method, is shaped by chained methods, and ends with a method that executes it:
 
 ```php
+Employees::fetch()->matching(['email' => $email])->asRow();     // ?array, the first row
+Employees::fetch()->matching(['enabled' => true])->asTable();   // array of rows
+Employees::count()->matching(['enabled' => true])->asValue();   // int
 
-use F4\Relentity\{
-  AbstractRelentity,
-  RelentityInterface,
-  Relation\ManyToMany,
-  Relation\ManyToOne,
-  Relation\OneToMany,
-  Relation\OneToOne,
-};
-
-use MyApp\{
-  Badges,
-  Contractors,
-  EmployeeSkills,
-  Projects,
-  Skills,
-  Timesheets,
-  Vacations,
-};
-
-class Employees extends AbstractRelentity implements RelentityInterface {
-
-  public const string TABLE_NAME = 'employee';                 // define primary entity table
-  public const string PRIMARY_KEY = 'employeeUUID';            // and primary key
-  public const string|array DEFAULT_SELECT = ['employeeUUID', 'name', 'email', 'passwordHash']; // instead of *
-  public const array DEFAULT_WHERE = ['deleted' => false];     // applied to every statement
-  public const ?int DEFAULT_LIMIT = 50;                        // instead of 100, null for no limit
-  public const array DEFAULT_CONCEALING = ['passwordHash'];    // columns hidden unless revealed
-  public const array DEFAULT_ORDER = ['name' => 'asc'];
-  public const array DEFAULT_RELATIONS = ['contractor'];       // joined unless a query opts out
-
-  // define relations declaratively
-  public const array RELATIONS = [
-    'vacations' => Vacations::class,                           // shorthand for [Vacations::class, OneToMany::class]
-    'contractor' => [Contractors::class, ManyToOne::class],    // "belongs to": employee.contractorUUID
-    'manager' => [Employees::class, ManyToOne::class,          // same, with a differently named column
-      'sourceKey' => 'managerUUID',
-    ],
-    'badge' => [Badges::class, OneToOne::class],               // "has one": badge.employeeUUID
-    'skills' => [Skills::class, ManyToMany::class, 'through' => EmployeeSkills::class],  // link table as an entity
-    'projects' => [Projects::class, ManyToMany::class, 'through' => 'employee_project'], // or just a table name
-    'recentTimesheets' => [Timesheets::class, OneToMany::class,
-      'modifyTarget' => static function (Timesheets $timesheets): Timesheets {
-        return $timesheets->sortedBy(['date' => 'desc'])->limitedTo(10);
-      },
-    ],
-    'timesheetCount' => [Timesheets::class, OneToMany::class, 'count' => true],
-  ];
-
-  public function enabled(): static {
-    return $this->matching([
-      'enabled' => true,
-    ]);
-  }
-};
+Employees::add(['name' => 'Eve', 'email' => 'eve@example.com'])->asRow();        // the inserted row
+Employees::change(['enabled' => false])->matching(['employeeUUID' => $uuid])->execute();
+Employees::remove()->matching(['employeeUUID' => $uuid])->execute();
 ```
 
-### Method reference
-
-Every statement starts with one of four static methods. All of them return the entity, so the
-methods below can be chained.
-
-| Method | Description |
-|---|---|
-| `fetch($columns = null)` | starts a `SELECT`; `$columns` replace `DEFAULT_SELECT` |
-| `add(array $values)` | starts an `INSERT` of `$values` |
-| `change(array $changes)` | starts an `UPDATE` setting `$changes` |
-| `remove()` | starts a `DELETE` |
-
-The following methods shape the statement and return the entity:
-
-| Method | Applies to | Description |
-|---|---|---|
-| `matching(...$filters)` | fetch, change, remove | adds conditions to `DEFAULT_WHERE` and to earlier calls |
-| `selecting(...$columns)` | fetch | replaces the columns given to `fetch()` or `DEFAULT_SELECT` |
-| `sortedBy(...$criteria)` | fetch | replaces the ordering, `DEFAULT_ORDER` included; removes it without arguments |
-| `limitedTo(?int $rows, ?int $skipping = null)` | fetch | replaces `DEFAULT_LIMIT`, `null` removes the limit; optionally sets the offset |
-| `unlimited()` | fetch | removes the limit, same as `limitedTo(null)` |
-| `skipping(int $rows)` | fetch | sets the offset |
-| `with(...$relations)` | fetch | joins relations by alias, in addition to `DEFAULT_RELATIONS` |
-| `without(...$relations)` | fetch | omits relations by alias, default ones included |
-| `concealing(...$columns)` | all | hides result keys or paths, in addition to `DEFAULT_CONCEALING` |
-| `revealing(...$columns)` | all | shows keys or paths concealed by default; `concealing()` still wins |
-
-The following methods end the chain:
-
-| Method | Returns | Description |
-|---|---|---|
-| `asTable()` | `array` | executes the statement and returns all rows |
-| `asRow()` | `?array` | executes the statement and returns the first row |
-| `asValue(string\|int $column = 0)` | `mixed` | executes the statement and returns a single value of the first row |
-| `asCount()` | `int` | executes a `COUNT(*)` of the matching rows, ignoring relations, ordering, limit and offset |
-| `execute()` | `void` | executes the statement and discards the result |
-| `asQuery($columns = null, ?string $returning = null)` | `QueryBuilderInterface` | builds the statement without executing it; `$columns` override the selected ones, `$returning` overrides `DEFAULT_RETURNING` |
-| `asSQL()` | `string` | builds the statement and returns its SQL without executing it |
-| `getConcealedColumns()` | `list<string>` | keys and paths that are concealed in the end, defaults included |
-
-### Query defaults
-
-`DEFAULT_SELECT`, `DEFAULT_WHERE`, `DEFAULT_ORDER` and `DEFAULT_LIMIT` shape every statement
-of the entity, and each one can be overridden or extended per query:
+Nothing is executed until the last call, and `asQuery()` or `asSQL()` return the statement instead:
 
 ```php
-Employees::fetch();
-// SELECT "employeeUUID", "name", "email", "passwordHash" FROM "employee" WHERE "deleted" = FALSE ORDER BY "name" ASC LIMIT 50
-
-Employees::fetch('*')                     // fetch() arguments replace DEFAULT_SELECT
-  ->selecting(['name', 'email'])          // selecting() replaces them again
-  ->matching(['enabled' => true])         // matching() adds to DEFAULT_WHERE
-  ->sortedBy(['email' => 'asc'])          // sortedBy() replaces DEFAULT_ORDER
-  ->limitedTo(10);                        // limitedTo() replaces DEFAULT_LIMIT
-// SELECT "name", "email" FROM "employee" WHERE "deleted" = FALSE AND "enabled" = TRUE ORDER BY "email" ASC LIMIT 10
-
-Employees::fetch()
-  ->sortedBy()                            // no arguments: removes the ordering
-  ->unlimited();                          // removes the limit, same as limitedTo(null)
-// SELECT "employeeUUID", "name", "email", "passwordHash" FROM "employee" WHERE "deleted" = FALSE
+Employees::fetch()->matching(['email' => $email])->asSQL();
+// SELECT "employee".* FROM "employee" WHERE "email" = '...' LIMIT 100
 ```
 
-- `DEFAULT_SELECT` is `'*'` unless redefined, and accepts anything `select()` does.
-  `fetch()` arguments and `selecting()` both replace it, so the columns can be chosen
-  at any point of the chain without dropping to `asQuery()`. It only applies to `fetch()`.
-  When relations are joined, `*` is emitted as `"table".*`, so it covers the entity's own
-  columns only and every relation adds exactly one column named after its alias.
-- `DEFAULT_WHERE` also applies to `change()` and `remove()`, so with the definition above
-  `Employees::remove()` never touches rows marked as deleted.
-- `DEFAULT_ORDER` is empty unless redefined. Unlike `matching()`, `with()`, `concealing()`
-  and `revealing()`, which add to what is already set, `sortedBy()` replaces the ordering,
-  so pass all criteria in a single call. It only applies to `fetch()`.
-- `DEFAULT_LIMIT` is `100` unless redefined, set it to `null` for entities that should be
-  fetched without a limit. It only applies to `fetch()`.
+`matching()` accepts anything that `where()` of f4php/db accepts: `['column' => $value]`, a list for `IN`, `null` for `IS NULL`, an expression with a placeholder such as `['"date" >= {#}' => $since]`, or a `ConditionCollection`. Each call adds to the previous ones with `AND`.
 
-- `DEFAULT_CONCEALING` lists result keys, or paths such as `$.settings.secret`, that are
-  removed from every row. Each of the following overrides the ones before it, whatever the
-  order of the calls: `DEFAULT_CONCEALING`, `revealing()`, `concealing()`. So `revealing()`
-  undoes a default and `concealing()` always wins.
-  `getConcealedColumns()` returns the resulting list.
+## Entity defaults
 
-When the entity is the target of a relation, the same defaults apply to the related rows.
-Concealed keys are then removed in SQL, as the related rows are a subquery that is never
-executed on its own:
+Optional constants define how every statement of an entity is built:
 
 ```php
-Employees::fetch()->with('manager')->asSQL();
-// SELECT ..., "manager"."relation_rows" AS "manager" FROM "employee" LEFT JOIN LATERAL (
-//   SELECT to_jsonb("employee".*) - ARRAY['passwordHash']::text[] AS "relation_rows" FROM (...) AS "employee"
-// ) AS "manager" ON true ...
+class Employees extends AbstractRelentity
+{
+    public const string TABLE_NAME = 'employee';
+    public const string PRIMARY_KEY = 'employeeUUID';
+
+    public const array DEFAULT_SELECT = ['employeeUUID', 'name', 'email', 'departmentUUID', 'managerUUID'];
+    public const array DEFAULT_WHERE = ['deleted' => false];
+    public const array DEFAULT_ORDER = ['name' => 'asc'];
+    public const ?int DEFAULT_LIMIT = 50;
+
+    // a custom filter, reusable in any chain
+    public function enabled(): static
+    {
+        return $this->matching(['enabled' => true]);
+    }
+}
+
+Employees::fetch()->enabled()->asSQL();
+// SELECT "employeeUUID", "name", "email", "departmentUUID", "managerUUID" FROM "employee"
+//   WHERE "deleted" = FALSE AND "enabled" = TRUE ORDER BY "name" ASC LIMIT 50
 ```
 
-A relation may target the entity's own table, like `manager` above. Inside the subquery of
-related rows the table name then refers to the target, so the source key is read just outside of it:
+| Constant | Default | Applies to | Overridden by |
+|---|---|---|---|
+| `DEFAULT_SELECT` | all columns of the table | `fetch()` | `fetch($columns)`, `selecting()` |
+| `DEFAULT_WHERE` | none | `fetch()`, `count()`, `change()`, `remove()` | extended by `matching()` |
+| `DEFAULT_ORDER` | none | `fetch()` | `sortedBy()` replaces it, `sortedBy()` without arguments removes it |
+| `DEFAULT_LIMIT` | `100` | `fetch()` | `limitedTo()`, `unlimited()`; `null` means no limit |
+| `DEFAULT_RETURNING` | `'*'` | `add()`, `change()`, `remove()` | `asQuery(returning: ...)`; `null` means no `RETURNING` |
+| `DEFAULT_RELATIONS` | none | `fetch()` | extended by `with()`, reduced by `without()` |
+| `DEFAULT_CONCEALING` | none | all | see [Concealing columns](#concealing-columns) |
+| `DEFAULT_ADAPTER` | the configured adapter | all | a class name implementing `F4\DB\Adapter\AdapterInterface` |
 
-```php
-// ... LEFT JOIN LATERAL (
-//   SELECT to_jsonb("employee".*) - ARRAY['passwordHash']::text[] AS "relation_rows"
-//   FROM (SELECT "employee"."managerUUID" AS "key") AS "relation_source"
-//   CROSS JOIN LATERAL (SELECT ... FROM "employee" WHERE "employee"."employeeUUID" = "relation_source"."key" ...) AS "employee"
-// ) AS "manager" ON true ...
-```
+`DEFAULT_WHERE` also applies to `change()` and `remove()`, so with the definition above `Employees::remove()` never touches rows that are marked as deleted.
 
-Use `modifyTarget` to conceal or reveal keys for a single relation. Two things to keep in mind:
+When an entity is the target of a relation, its defaults apply to the related rows as well.
 
-- A path is removed with `#-`, which does not descend into JSON lists. To hide keys of a
-  nested to-many relation, conceal them on the entity that is its target instead.
-- A key removed this way is absent from the result, so with `DB_STRICT_CONCEAL` enabled the
-  source must not conceal it again, e.g. as `$.manager.passwordHash`.
+## Relations
 
 ### Declaring relations
 
-Every `RELATIONS` entry is keyed by the relation alias, which is also the name of the
-result column holding the related data. The entity declaring the relation is the **source**,
-the related entity is the **target**.
+Relations are declared in `RELATIONS`, keyed by an alias, which is also the name of the result column that holds the related data. Each value is a closure returning a relation:
 
-An entry is either a target class, or an array of the target class, the relation class
-(`OneToMany` when omitted) and any named options:
-
-```php
-'alias' => [TargetClass::class, RelationClass::class, 'option' => $value, ...],
-```
-
-Options are named arguments of the relation class constructor, so a misspelled or
-mistyped option fails with a clear error naming the relation, e.g.
-`Invalid declaration of Employees::RELATIONS['skills']: Unknown named parameter $tragetKey`.
-Every option except `through` of a `ManyToMany` relation has a default, so most
-relations need none:
-
-| Option | OneToOne | ManyToOne | OneToMany | ManyToMany | Purpose |
-|---|---|---|---|---|---|
-| `sourceKey` | `source::PRIMARY_KEY` | `target::PRIMARY_KEY` | `source::PRIMARY_KEY` | `source::PRIMARY_KEY` | column on the source table |
-| `targetKey` | `source::PRIMARY_KEY` | `target::PRIMARY_KEY` | `source::PRIMARY_KEY` | `target::PRIMARY_KEY` | column on the target table |
-| `through` | — | — | — | **required** | link table name or Relentity class |
-| `throughSourceKey` | — | — | — | `source::PRIMARY_KEY` | link-table column pointing to the source |
-| `throughTargetKey` | — | — | — | `target::PRIMARY_KEY` | link-table column pointing to the target |
-| `modifyTarget` | `null` | `null` | `null` | `null` | `Closure(target): target`, modifies the target query |
-| `modifyThrough` | — | — | — | `null` | `Closure(through): through`, requires `through` to be a Relentity class |
-| `count` | — | — | `false` | `false` | return the number of related rows instead of the rows |
-| `customSelectCallback` | `null` | `null` | `null` | `null` | last resort: `Closure($query, $source, $alias): $query`, replaces the select expression |
-| `customJoinCallback` | `null` | `null` | `null` | `null` | last resort: `Closure($query, $source, $alias): $query`, replaces the join |
-
-`OneToOne` and `ManyToOne` both return a single related row and differ only in where the
-key lives, which decides their default keys: use `OneToOne` when the target table points
-to the source ("has one"), and `ManyToOne` when the source table points to the target
-("belongs to").
-
-#### Modifying the target
-
-`modifyTarget` receives the target Relentity and returns it modified, so filtering,
-sorting, limits and nested relations use the same methods as any other query. PHP allows
-two closure forms in a class constant.
-
-An inline `static function`, for a modification used by one relation (arrow functions
-`fn` are not allowed in constants):
+- `One::of($target)` returns a single related row, or `null`.
+- `Many::of($target)` returns a list of related rows, or `null` when there are none.
+- `ManyToMany::of($target)` is an alias of `Many`, for readability of relations [through a link table](#link-tables).
 
 ```php
-'recentTimesheets' => [Timesheets::class, OneToMany::class,
-  'modifyTarget' => static function (Timesheets $timesheets): Timesheets {
-    return $timesheets
-      ->matching(['approved' => true])
-      ->sortedBy(['date' => 'desc'])
-      ->limitedTo(10);
-  },
-],
-```
+use F4\Relentity\AbstractRelentity;
+use F4\Relentity\Relation\{Many, One, RelationInterface};
 
-A first-class callable to a **static** method, for a modification that is reused:
+class Employees extends AbstractRelentity
+{
+    public const string TABLE_NAME = 'employee';
+    public const string PRIMARY_KEY = 'employeeUUID';
 
-```php
-class Timesheets extends AbstractRelentity implements RelentityInterface {
-  // ...
-  public static function approved(self $timesheets): self {
-    return $timesheets->matching(['approved' => true]);
-  }
+    public const array RELATIONS = [
+        // employee.departmentUUID = department.departmentUUID
+        'department' => static function (): RelationInterface {
+            return One::of(Departments::class);
+        },
+        // employee.employeeUUID = timesheet.employeeUUID
+        'timesheets' => static function (): RelationInterface {
+            return Many::of(Timesheets::class);
+        },
+        // through the employee_project table, see "Link tables" below
+        'projects' => static function (): RelationInterface {
+            return Many::of(Projects::class)->via('employee_project');
+        },
+    ];
 }
 
-'approvedTimesheets' => [Timesheets::class, OneToMany::class,
-  'modifyTarget' => Timesheets::approved(...),
-],
+$employees = Employees::fetch()->with('department', 'timesheets', 'projects')->asTable();
 ```
 
-#### Link tables
-
-A `ManyToMany` relation always names its link table in `through`. A plain table name is
-enough when the table only holds the two keys:
+Every row then contains one additional key per relation, already decoded from JSON:
 
 ```php
-'projects' => [Projects::class, ManyToMany::class, 'through' => 'employee_project'],
-
-// with key columns that are not named after the primary keys
-'projects' => [Projects::class, ManyToMany::class,
-  'through' => 'employee_project',
-  'throughSourceKey' => 'employeeId',
-  'throughTargetKey' => 'projectId',
-],
+[
+    'employeeUUID' => 'e2',
+    'name' => 'Bob',
+    // ...
+    'department' => ['departmentUUID' => 'd1', 'name' => 'R&D'],
+    'timesheets' => [
+        ['timesheetUUID' => 't2', 'date' => '2026-11-02', 'hours' => 6, /* ... */],
+        ['timesheetUUID' => 't1', 'date' => '2026-11-01', 'hours' => 8, /* ... */],
+    ],
+    'projects' => [
+        ['projectUUID' => 'p1', 'name' => 'Apollo', /* ... */],
+        ['projectUUID' => 'p2', 'name' => 'Gemini', /* ... */],
+    ],
+]
 ```
 
-A link table declared as a Relentity class applies its own `DEFAULT_WHERE`, and
-`modifyThrough` modifies it the same way `modifyTarget` modifies the target.
+The entity that declares a relation is its **source**, the related entity is its **target**. The closure is called with the source instance whenever the relation is used, so a relation is built anew for every query. PHP does not allow arrow functions (`fn`) in constants, so use `static function` or a [first-class callable](#customizing-the-target).
 
-#### Custom relations
+### Join conditions
 
-For anything the options can't express, write a relation class implementing
-`RelationInterface` (extending `AbstractRelation` gives you the defaults) and use it in
-position 1 with its own named options. As a last resort, `customSelectCallback` and `customJoinCallback` replace the
-generated SQL of a single relation.
+Without a condition, a relation follows the naming convention of the primary keys:
 
-### Fetching the data
+| Relation | Default condition | Typical meaning |
+|---|---|---|
+| `One::of(Target::class)` | `source.<target key> = target.<target key>` | the source "belongs to" the target |
+| `Many::of(Target::class)` | `source.<source key> = target.<source key>` | the source "has many" targets |
+
+The second argument of `of()` changes the columns:
 
 ```php
-Employees::fetch()
-    ->with('vacations')                   // relations are included on demand in addition to default ones
-    ->matching(['enabled' => true])       // criteria that are accepted by where()
-    ->sortedBy(['name' => 'asc'])
-    ->limitedTo(10, skipping: 20)         // or ->limitedTo(10)->skipping(20)
-    ->asTable();
+// a column of the same name on both sides
+'department' => static function (): RelationInterface {
+    return One::of(Departments::class, 'departmentId');      // employee.departmentId = department.departmentId
+},
 
-Employees::fetch()
-  ->with('recentTimesheets')              // add non-default relation on demand
-  ->without('contractor')                 // omit default relation on demand
-  ->enabled()                             // custom shorthand filter
-  ->asCount();                            // COUNT(*) projection
-
-$statement = Employees::fetch()
-  ->revealing('passwordHash')             // reveal columns concealed by default
-  ->asQuery();                            // QueryBuilderInterface, nothing executed
+// differently named columns: ['source column' => 'target column']
+'manager' => static function (): RelationInterface {
+    return One::of(Employees::class, ['managerUUID' => 'employeeUUID']);   // employee.managerUUID = manager.employeeUUID
+},
+'reports' => static function (): RelationInterface {
+    return Many::of(Employees::class, ['employeeUUID' => 'managerUUID']);  // employee.employeeUUID = report.managerUUID
+},
 ```
 
-`matching()`, `sortedBy()`, `with()`, `without()`, `concealing()` and `revealing()` take any
-number of positional arguments and reject named ones with an `InvalidArgumentException`:
-PHP would otherwise accept any name, so `matching(status: [...])` would silently filter by
-a `status` column.
+In the array form the key is always the column of the source and the value is the column of the target. As `manager` and `reports` show, the source and the target may be the same table.
 
+A [`ConditionCollection`](#completely-custom-conditions) replaces the condition completely.
+
+### Link tables
+
+`via()` relates the source to the target through a link table, and works the same for `Many` and `ManyToMany`:
+
+```php
+// employee.employeeUUID = employee_project.employeeUUID AND employee_project.projectUUID = project.projectUUID
+'projects' => static function (): RelationInterface {
+    return ManyToMany::of(Projects::class)->via('employee_project');
+},
+```
+
+The second and the third arguments are the conditions for each side of the link table, in the same forms as [above](#join-conditions). In each array, the key is the column of the side that is closer to the source:
+
+```php
+// employee.employeeUUID = employee_skill.employeeId AND employee_skill.skillId = skill.skillUUID
+'skills' => static function (): RelationInterface {
+    return ManyToMany::of(Skills::class)->via(
+        'employee_skill',
+        ['employeeUUID' => 'employeeId'],    // source => link table
+        ['skillId' => 'skillUUID'],          // link table => target
+    );
+},
+```
+
+If the link table has columns of its own, pass an entity instead of a table name: its `DEFAULT_WHERE` and its `matching()` conditions then filter the links.
+
+```php
+'verifiedSkills' => static function (): RelationInterface {
+    return ManyToMany::of(Skills::class)->via(
+        EmployeeSkills::fetch()->matching(['verified' => true]),
+        ['employeeUUID' => 'employeeId'],
+        ['skillId' => 'skillUUID'],
+    );
+},
+```
+
+A link table is used in an `EXISTS` condition, not joined, so duplicate links never duplicate the related rows.
+
+### Customizing the target
+
+`of()` accepts an entity class, or a statement started with `fetch()` or `count()`, which can be shaped by the same methods as any other query:
+
+```php
+class Timesheets extends AbstractRelentity
+{
+    public const string TABLE_NAME = 'timesheet';
+    public const string PRIMARY_KEY = 'timesheetUUID';
+    public const array DEFAULT_ORDER = ['date' => 'desc'];
+
+    public static function approved(): static
+    {
+        return static::fetch()->matching(['approved' => true]);
+    }
+}
+
+class Employees extends AbstractRelentity
+{
+    // ...
+    public const array RELATIONS = [
+        // filtered, sorted by DEFAULT_ORDER of Timesheets, and limited
+        'recentTimesheets' => static function (): RelationInterface {
+            return Many::of(Timesheets::approved()->limitedTo(5));
+        },
+        // an integer instead of the rows
+        'timesheetCount' => static function (): RelationInterface {
+            return Many::of(Timesheets::count());
+        },
+        // counts work through link tables, too
+        'projectCount' => static function (): RelationInterface {
+            return Many::of(Projects::count())->via('employee_project');
+        },
+        // relations of the target are included with with(), at any depth
+        'projectsWithClients' => static function (): RelationInterface {
+            return ManyToMany::of(Projects::fetch()->with('client'))->via('employee_project');
+        },
+    ];
+}
+```
+
+A relation can also be a first-class callable to a static method, which is convenient when the same relation is declared by several entities:
+
+```php
+class Timesheets extends AbstractRelentity
+{
+    // ...
+    public static function ofEmployee(): RelationInterface
+    {
+        return Many::of(static::approved(), 'employeeUUID');
+    }
+}
+
+class Employees extends AbstractRelentity
+{
+    // ...
+    public const array RELATIONS = [
+        'approvedTimesheets' => Timesheets::ofEmployee(...),
+    ];
+}
+```
+
+`One` supports `fetch()` targets only, and returns the first row according to the ordering of the target.
+
+### Choosing relations per query
+
+Relations are included with `with()`, in addition to those listed in `DEFAULT_RELATIONS`, and excluded with `without()`:
+
+```php
+class Employees extends AbstractRelentity
+{
+    // ...
+    public const array DEFAULT_RELATIONS = ['department'];
+}
+
+Employees::fetch()->asTable();                                   // with department
+Employees::fetch()->with('timesheets', 'projects')->asTable();   // with department, timesheets and projects
+Employees::fetch()->without('department')->asTable();            // without any relations
+```
+
+`with()` also accepts an array of aliases and closures, which defines a relation for a single query. A known alias is replaced, a new alias is added. Arrow functions are allowed here:
+
+```php
+// replace the declared timesheets relation for this query only
+Employees::fetch()->with(['timesheets' => fn() => Many::of(Timesheets::approved())]);
+
+// add a relation that is not declared in RELATIONS
+Employees::fetch()->with([
+    'timesheetsSince' => fn() => Many::of(Timesheets::fetch()->matching(['"date" >= {#}' => $since])),
+]);
+```
+
+### Completely custom conditions
+
+Any `ConditionCollection` can serve as the condition of a relation, or as either condition of `via()`. It replaces the generated condition completely, and may contain any SQL that is valid in a `WHERE` clause.
+
+Inside a relation, the current row of the source is available under the alias `Many::SOURCE_ALIAS` (the same as `One::SOURCE_ALIAS`), and it contains **all** columns of the source table, not only those that are selected. The target is referred to by its table name. Always qualify source columns with the alias: unqualified columns refer to the target.
+
+```php
+use F4\DB;
+use F4\DB\{ConditionCollection, Fragment};
+
+class Employees extends AbstractRelentity
+{
+    // ...
+    public const array RELATIONS = [
+        // timesheets within the employment period only
+        'contractTimesheets' => static function (): RelationInterface {
+            return Many::of(Timesheets::class, ConditionCollection::of(
+                new Fragment('{#::#}.{#::#} = "timesheet"."employeeUUID"', [
+                    DB::escapeIdentifier(Many::SOURCE_ALIAS),
+                    DB::escapeIdentifier('employeeUUID'),
+                ]),
+                new Fragment('"timesheet"."date" BETWEEN "___source___"."hiredAt" AND COALESCE("___source___"."leftAt", CURRENT_DATE)'),
+            ));
+        },
+        // other employees of the same department, which is the same table as the source
+        'colleagues' => static function (): RelationInterface {
+            return Many::of(Employees::class, ConditionCollection::of(
+                new Fragment('"employee"."departmentUUID" = "___source___"."departmentUUID"'),
+                new Fragment('"employee"."employeeUUID" <> "___source___"."employeeUUID"'),
+            ));
+        },
+    ];
+}
+```
+
+The first condition builds the alias with `DB::escapeIdentifier()`, which is also safe for adapters that quote identifiers differently. The others spell out `"___source___"`, the value of the constant, which is shorter in hand-written SQL.
+
+Values are bound with placeholders, never interpolated:
+
+```php
+ConditionCollection::of(
+    new Fragment('"___source___"."employeeUUID" = "timesheet"."employeeUUID"'),
+    ['"timesheet"."hours" >= {#}' => $minimumHours],
+);
+```
+
+When a condition is needed for a single query only, combine it with `with()`:
+
+```php
+Employees::fetch()->with([
+    'longDays' => fn() => Many::of(Timesheets::class, ConditionCollection::of(
+        new Fragment('"___source___"."employeeUUID" = "timesheet"."employeeUUID"'),
+        ['"timesheet"."hours" >= {#}' => $minimumHours],
+    )),
+]);
+```
+
+## Joining tables
+
+Relations add data to each row without filtering the rows. To filter the rows of an entity by another table, join it with `joinedWith()`, which is supported by `fetch()` only. A string condition is a column of the same name in both tables (`USING`), anything else is an `ON` condition:
+
+```php
+// employees assigned to a project
+Employees::fetch()
+    ->joinedWith('employee_project', 'employeeUUID')
+    ->matching(['employee_project.projectUUID' => $projectUUID]);
+// SELECT ... FROM "employee" JOIN "employee_project" USING ("employeeUUID")
+//   WHERE "deleted" = FALSE AND "employee_project"."projectUUID" = '...' ...
+
+// employees of a department, by its name
+Employees::fetch()
+    ->selecting('employee.*')
+    ->joinedWith('department', [new Fragment('"department"."departmentUUID" = "employee"."departmentUUID"')])
+    ->matching(['department.name' => 'R&D']);
+```
+
+The third argument is the name of the join method of f4php/db, `join` by default, e.g. `leftJoin` or `innerJoinLateral`.
+
+Joined tables share the namespace of the query, so a column that exists in several tables must be qualified, in `selecting()`, `matching()` and `sortedBy()` as well as in `DEFAULT_SELECT` and `DEFAULT_WHERE`. That is why the second example selects `employee.*`: both tables have a `name` column. Joined rows multiply the rows of the entity when they are not unique for each of them.
+
+## Concealing columns
+
+`concealing()` removes keys from the result rows, and `revealing()` restores keys that `DEFAULT_CONCEALING` removes. Keys may be paths into JSON columns, such as `$.settings.secret`.
+
+```php
+class Employees extends AbstractRelentity
+{
+    // ...
+    public const array DEFAULT_CONCEALING = ['passwordHash'];
+}
+
+Employees::fetch()->asTable();                              // without passwordHash
+Employees::fetch()->revealing('passwordHash')->asTable();   // with passwordHash
+Employees::fetch()->concealing('email')->asTable();         // without passwordHash and email
+```
+
+Each of the following overrides the ones before it, whatever the order of the calls: `DEFAULT_CONCEALING`, `revealing()`, `concealing()`. `getConcealedColumns()` returns the resulting list.
+
+## Reference
+
+### Starting a statement
+
+| Method | Statement |
+|---|---|
+| `fetch($columns = null)` | `SELECT`; `$columns` replace `DEFAULT_SELECT` |
+| `count()` | `SELECT COUNT(*)` |
+| `add(array $values)` | `INSERT` |
+| `change(array $changes)` | `UPDATE` |
+| `remove()` | `DELETE` |
+
+### Shaping a statement
+
+All of them return the entity.
+
+| Method | Takes effect for | Description |
+|---|---|---|
+| `matching(...$filters)` | all except `add()` | adds conditions to `DEFAULT_WHERE` and to earlier calls |
+| `selecting(...$columns)` | `fetch()` | replaces the selected columns |
+| `sortedBy(...$criteria)` | `fetch()` | replaces the ordering; removes it without arguments |
+| `limitedTo(?int $rows, ?int $skipping = null)` | `fetch()` | replaces the limit, `null` removes it; optionally sets the offset |
+| `unlimited()` | `fetch()` | removes the limit |
+| `skipping(int $rows)` | `fetch()` | sets the offset |
+| `with(...$relations)` | `fetch()` | includes relations by alias, or `['alias' => callable]` |
+| `without(...$relations)` | `fetch()` | excludes relations by alias, default ones included |
+| `joinedWith($table, $condition, $method = 'join')` | `fetch()` | joins a table, see [Joining tables](#joining-tables) |
+| `concealing(...$columns)` | all | conceals result keys or paths |
+| `revealing(...$columns)` | all | reveals keys or paths concealed by default |
+
+`selecting()`, `with()`, `without()` and `joinedWith()` throw an `InvalidArgumentException` for any other statement, and so do `sortedBy()`, `limitedTo()` and `skipping()` for `count()`, and `limitedTo()` and `skipping()` for `remove()`.
+
+`matching()`, `selecting()`, `sortedBy()`, `with()`, `without()`, `concealing()` and `revealing()` reject named arguments, since PHP would otherwise accept any name: `matching(status: [...])` would silently filter by a `status` column.
+
+### Ending a statement
+
+| Method | Returns | Description |
+|---|---|---|
+| `asTable()` | `array` | executes the statement and returns all rows; not available for `count()` |
+| `asRow()` | `?array` | executes the statement and returns the first row; not available for `count()` |
+| `asValue(string\|int $column = 0)` | `mixed` | executes the statement and returns one value of the first row; an `int` for `count()` |
+| `execute()` | `void` | executes the statement and discards the result |
+| `asQuery($columns = null, ?string $returning = null)` | `QueryBuilderInterface` | builds the statement without executing it |
+| `asSQL()` | `string` | builds the statement and returns its SQL |
+
+### Relations
+
+| Method | Description |
+|---|---|
+| `One::of($target, $condition = null)` | a single related row; `$target` is a class or a `fetch()` statement |
+| `Many::of($target, $condition = null)` | a list of related rows, or their number for a `count()` target |
+| `ManyToMany::of($target, $condition = null)` | same as `Many` |
+| `->via($table, $sourceCondition = null, $targetCondition = null)` | `Many` and `ManyToMany` only: relates through a link table name, or a `fetch()` statement of a link entity |
+
+A condition is one of:
+
+| Condition | Meaning |
+|---|---|
+| `null` | the [default](#join-conditions) |
+| `'column'` | the same column on both sides |
+| `['sourceColumn' => 'targetColumn']` | differently named columns, the source side first |
+| `ConditionCollection` | a [custom condition](#completely-custom-conditions), used as is |
