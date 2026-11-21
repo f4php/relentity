@@ -35,7 +35,7 @@ is_numeric,
 is_string
 ;
 
-class AbstractRelentity implements RelentityInterface
+abstract class AbstractRelentity implements RelentityInterface
 {
     // Must be redefined by every child, checked in the constructor. A self-referencing
     // constant here would make PHP fail to instantiate children with closures in their constants

@@ -8,6 +8,8 @@ use Closure;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
+use F4\DBTransaction;
+use F4\DB\PreparedStatement;
 use F4\DB\Exception\ConcealedColumnNotFoundException;
 use F4\Relentity\Relation\One;
 use F4\Tests\DB\FixtureAdapter;
@@ -252,6 +254,46 @@ final class ConcealmentTest extends TestCase
         FixtureAdapter::reset([self::account('a1')]);
 
         $this->assertSame(self::concealedAccount('a1'), $build()->asRow());
+    }
+
+    public function testTransactionConcealsTheRowsLikeDirectExecution(): void
+    {
+        FixtureAdapter::reset([self::account('a1', ['owner' => self::account('a0')])]);
+        $query = Account::fetch()->with('owner')->asQuery();
+
+        $direct = $query->asTable();
+        [, $transactional] = new DBTransaction(adapter: new FixtureAdapter())->add($query)->commit();
+
+        $this->assertSame([self::concealedAccount('a1', ['owner' => self::concealedAccount('a0')])], $direct);
+        $this->assertSame($direct, $transactional);
+    }
+
+    public function testTransactionConcealsReturning(): void
+    {
+        FixtureAdapter::reset([self::account('a1')]);
+
+        [, $changed, $removed] = new DBTransaction(adapter: new FixtureAdapter())
+            ->add(Account::change(['name' => 'x'])->asQuery())
+            ->add(Account::remove()->asQuery())
+            ->commit();
+
+        $this->assertSame([self::concealedAccount('a1')], $changed);
+        $this->assertSame([self::concealedAccount('a1')], $removed);
+    }
+
+    public function testTransactionRollsBackWhenAConcealedKeyIsMissing(): void
+    {
+        FixtureAdapter::reset([['accountUUID' => 'a1']]);
+
+        try {
+            new DBTransaction(adapter: new FixtureAdapter())->add(Account::change(['name' => 'x'])->asQuery())->commit();
+            $this->fail('Expected ' . ConcealedColumnNotFoundException::class);
+        } catch (ConcealedColumnNotFoundException) {
+            $this->assertSame(
+                ['BEGIN', 'UPDATE "account" SET "name" = $1 RETURNING *', 'ROLLBACK'],
+                array_map(static fn(PreparedStatement $statement): string => $statement->query, FixtureAdapter::$statements),
+            );
+        }
     }
 
     public function testCountIsNotConcealed(): void

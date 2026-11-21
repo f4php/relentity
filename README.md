@@ -508,11 +508,31 @@ Employees::fetch()->with('manager', 'reports')->getConcealedColumns();
 
 Concealed keys are removed by f4php/db after the statement is executed, before any hook observes the result. Concealed values are therefore still selected and transferred from the database, but they never reach the code that receives the result.
 
+This includes statements executed in a `DBTransaction` (f4php/db 0.4.8 or later), where each statement keeps its own concealment:
+
+```php
+use F4\DBTransaction;
+
+[, $changed] = DBTransaction::add(
+    Employees::change(['enabled' => false])->matching(['employeeUUID' => $uuid])->asQuery(),
+)->commit();
+// $changed holds the RETURNING rows, without passwordHash
+```
+
 With `DB_STRICT_CONCEAL` enabled, every concealed key must be present in every row, so a misspelled key throws a `ConcealedColumnNotFoundException` instead of silently exposing the column. Related rows that are `null`, and empty lists of related rows, are skipped. If a statement selects only some of the columns, with `selecting()`, `DEFAULT_SELECT` or a custom `RETURNING`, include the concealed columns or reveal them:
 
 ```php
 Employees::fetch()->selecting(['employeeUUID', 'name'])->revealing('passwordHash')->asTable();
 ```
+
+For `add()`, `change()` and `remove()`, the exception is thrown after the statement is executed. Outside of a transaction, the change is then already saved, and only its result is lost:
+
+```php
+// passwordHash is concealed by default, but not returned: the row is updated, then the exception is thrown
+Employees::change(['enabled' => false])->matching(['employeeUUID' => $uuid])->asQuery(returning: 'employeeUUID')->asRow();
+```
+
+When a write returns only some of the columns, reveal the concealed ones that it does not return. Alternatively, execute it in a `DBTransaction`, where the exception rolls the whole transaction back.
 
 Concealed keys are removed before `asValue()` picks its value, so pass it a column name rather than an index: with an index, the position of every column after a concealed one shifts by one.
 

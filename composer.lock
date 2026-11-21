@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "14e631731517a1171d31df27180ee858",
+    "content-hash": "24b4c23eeaf3359dc1ecbcddbfa8bfe0",
     "packages": [
         {
             "name": "composer/pcre",
@@ -85,16 +85,16 @@
         },
         {
             "name": "f4php/db",
-            "version": "v0.4.7",
+            "version": "v0.4.8",
             "source": {
                 "type": "git",
                 "url": "https://github.com/f4php/db.git",
-                "reference": "806631516c42151decee0c4a0cf446da95c0856b"
+                "reference": "39a576895e01256960396d4625e25dbdd95dd9f0"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/f4php/db/zipball/806631516c42151decee0c4a0cf446da95c0856b",
-                "reference": "806631516c42151decee0c4a0cf446da95c0856b",
+                "url": "https://api.github.com/repos/f4php/db/zipball/39a576895e01256960396d4625e25dbdd95dd9f0",
+                "reference": "39a576895e01256960396d4625e25dbdd95dd9f0",
                 "shasum": ""
             },
             "require": {
@@ -137,10 +137,10 @@
             ],
             "support": {
                 "issues": "https://github.com/f4php/db/issues",
-                "source": "https://github.com/f4php/db/tree/v0.4.7"
+                "source": "https://github.com/f4php/db/tree/v0.4.8"
             },
-            "time": "2026-11-20T11:03:59+00:00",
-            "published-time": "2026-11-20T11:04:15+00:00"
+            "time": "2026-11-21T15:27:35+00:00",
+            "published-time": "2026-11-21T15:27:54+00:00"
         },
         {
             "name": "f4php/hookmanager",
