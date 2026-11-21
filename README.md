@@ -37,7 +37,7 @@ Relations are compiled into `LEFT JOIN LATERAL` subqueries that return related r
 composer require f4php/relentity
 ```
 
-Relentity requires PHP 8.5.13 or later, and PostgreSQL: relations rely on `LATERAL` joins and `jsonb`. The connection is configured by the constants of an `F4\Config` class, as described in the [configuration of f4php/db](https://github.com/f4php/db#configuration). Within the F4 framework that class already exists; in a standalone project, define it before the first statement is executed:
+Relentity requires PHP 8.5.13 or later, and PostgreSQL: relations rely on `LATERAL` joins and `jsonb`. The connection is configured by the constants of an `F4\Config` class, as described in the [configuration of f4php/db](https://github.com/f4php/db#configuration). Within the F4 framework that class already exists. In a standalone project, define it, or make it autoloadable, before the first statement is built: some statements, such as `count()` and `fetch()->asQuery()`, need it before they are executed.
 
 ```php
 namespace F4;
@@ -49,7 +49,6 @@ class Config
     public const string DB_PORT = '5432';
     public const string DB_NAME = 'application';
     public const string DB_USERNAME = 'app';
-    #[\SensitiveParameter]
     public const string DB_PASSWORD = 'secret';
     public const string DB_CHARSET = 'UTF8';
     public const string DB_SCHEMA = '';
@@ -61,6 +60,8 @@ class Config
     public const string TIMEZONE = '';
 }
 ```
+
+Within the F4 framework, the password can additionally be marked with the framework's `F4\Config\SensitiveParameter` attribute (`use F4\Config\SensitiveParameter;`, then `#[SensitiveParameter]` above the constant). The attribute is not part of Relentity or its dependencies.
 
 ## Quick start
 
@@ -88,14 +89,28 @@ Employees::change(['enabled' => false])->matching(['employeeUUID' => $uuid])->ex
 Employees::remove()->matching(['employeeUUID' => $uuid])->execute();
 ```
 
-Nothing is executed until the last call, and `asQuery()` or `asSQL()` return the statement instead:
+`change()` ignores `limitedTo()`, `skipping()` and `sortedBy()`: it changes **every** row that matches its conditions, so narrow the rows with `matching()`, e.g. by the primary key. See [Shaping a statement](#shaping-a-statement) for the other combinations.
+
+Nothing is executed until the last call, and `asQuery()` or `asSQL()` return the statement instead. When a statement is executed, values are bound as parameters. `asSQL()` renders them, escaped, into the SQL for inspection, and the PostgreSQL adapter may open a connection to escape them. To see the SQL with its placeholders, use the prepared statement:
 
 ```php
 Employees::fetch()->matching(['email' => $email])->asSQL();
 // SELECT "employee".* FROM "employee" WHERE "email" = '...' LIMIT 100
+
+Employees::fetch()->matching(['email' => $email])->asQuery()->getPreparedStatement()->query;
+// SELECT "employee".* FROM "employee" WHERE "email" = $1 LIMIT 100
 ```
 
-`matching()` accepts anything that `where()` of f4php/db accepts: `['column' => $value]`, a list for `IN`, `null` for `IS NULL`, an expression with a placeholder such as `['"date" >= {#}' => $since]`, or a `ConditionCollection`. Each call adds to the previous ones with `AND`.
+`asQuery()` returns the f4php/db query builder, which can be extended before it is executed. Relentity's method names, such as `matching()` and `sortedBy()`, intentionally differ from those of the query builder, such as `where()` and `orderBy()`, so it is clear which one a call belongs to; the [reference](#shaping-a-statement) lists where similar methods behave differently. Note that Relentity's `with()` includes a relation, while the builder's `with()` introduces a common table expression (`WITH ... AS`).
+
+Prefer `matching()` for entity filters. After `asQuery()`, `where()` can extend an existing `WHERE`, including one that comes from `matching()` or `DEFAULT_WHERE`. Otherwise, a new `WHERE` is appended in call order, which is invalid SQL after `ORDER BY` or `LIMIT`:
+
+```php
+Employees::fetch()->matching(['enabled' => true])->asQuery()->where(['"name" ILIKE {#}' => $pattern])->asTable();
+// SELECT "employee".* FROM "employee" WHERE "enabled" = TRUE AND "name" ILIKE '...' LIMIT 100
+```
+
+`matching()` accepts filter arrays and `ConditionCollection` objects: `['column' => $value]`, a list for `IN`, `null` for `IS NULL`, an expression with a placeholder such as `['"date" >= {#}' => $since]`. A `Fragment` is wrapped in a collection, e.g. `matching(ConditionCollection::of(new Fragment('"hiredAt" > now() - interval \'1 year\'')))`. Each call adds to the previous ones with `AND`.
 
 Chained methods change the statement they are called on and return it, so a statement that is reused must be cloned before it is changed further:
 
@@ -141,14 +156,14 @@ Employees::fetch()->enabled()->asSQL();
 | `DEFAULT_WHERE` | none | `fetch()`, `count()`, `change()`, `remove()` | extended by `matching()` |
 | `DEFAULT_ORDER` | none | `fetch()` | `sortedBy()` replaces it, `sortedBy()` without arguments removes it |
 | `DEFAULT_LIMIT` | `100` | `fetch()` | `limitedTo()`, `unlimited()`; `null` means no limit |
-| `DEFAULT_RETURNING` | `'*'` | `add()`, `change()`, `remove()` | `asQuery(returning: ...)`; `null` means no `RETURNING` |
+| `DEFAULT_RETURNING` | `'*'` | `add()`, `change()`, `remove()` | `asQuery(returning: ...)`; a `null` constant means no `RETURNING`, while `asQuery(returning: null)` keeps the constant |
 | `DEFAULT_RELATIONS` | none | `fetch()` | extended by `with()`, reduced by `without()` |
 | `DEFAULT_CONCEALING` | none | `fetch()`, and `RETURNING` of `add()`, `change()`, `remove()` | extended by `concealing()`, reduced by `revealing()`, see [Concealing columns](#concealing-columns) |
 | `DEFAULT_ADAPTER` | `DB_ADAPTER_CLASS` of `F4\Config` | all | a class name implementing `F4\DB\Adapter\AdapterInterface`, instantiated without arguments for every statement |
 
 `DEFAULT_WHERE` also applies to `change()` and `remove()`, so with the definition above `Employees::remove()` never touches rows that are marked as deleted.
 
-When an entity is the target of a relation, its defaults apply to the related rows as well, except `DEFAULT_RELATIONS`, see [Relations of related rows](#relations-of-related-rows).
+When an entity is the target of a relation, its defaults apply to the related rows as well, with an exception for `DEFAULT_RELATIONS`, see [Relations of related rows](#relations-of-related-rows).
 
 ## Relations
 
@@ -156,9 +171,13 @@ When an entity is the target of a relation, its defaults apply to the related ro
 
 Relations are declared in `RELATIONS`, keyed by an alias, which is also the name of the result column that holds the related data. Each value is a closure returning a relation:
 
-- `One::of($target)` returns a single related row, or `null`.
-- `Many::of($target)` returns a list of related rows, or `null` when there are none.
-- `ManyToMany::of($target)` is an alias of `Many`, for readability of relations [through a link table](#link-tables).
+| Relation | Value | Without related rows |
+|---|---|---|
+| `One::of($target)` | the related row | `null` |
+| `Many::of($target)` | a list of related rows | `null`, not an empty list: iterate over `$row['timesheets'] ?? []` |
+| `Many::of(Target::count())` | the number of related rows, see [Customizing the target](#customizing-the-target) | `0` |
+
+`ManyToMany` is an alias of `Many`, for readability of relations [through a link table](#link-tables).
 
 ```php
 use F4\Relentity\AbstractRelentity;
@@ -211,11 +230,14 @@ Each relation adds one column, named after its alias, to the selected columns. W
 
 The entity that declares a relation is its **source**, the related entity is its **target**. The closure is called with the source statement whenever the relation is used, so a relation is built anew for every query, and can [depend on the source](#relations-that-depend-on-the-source). PHP does not allow arrow functions (`fn`) in constants, so use `static function` or a [first-class callable](#customizing-the-target).
 
-The `DEFAULT_LIMIT` of the target, `100` unless redefined, limits **each** list of related rows. An employee with 150 timesheets therefore gets the first 100 of them, while a [`count()` relation](#customizing-the-target) of the same timesheets returns 150. Lift or change the limit on the target:
+The `DEFAULT_LIMIT` of the target, `100` unless redefined, limits **each** list of related rows. An employee with 150 timesheets therefore gets up to 100 of them, while a [`count()` relation](#customizing-the-target) of the same timesheets returns 150. Which 100 depends on the ordering of the target, its `DEFAULT_ORDER` or `sortedBy()`; without one, PostgreSQL picks any. Lift or change the limit on the target, and sort it when the subset matters:
 
 ```php
 'timesheets' => static function (): RelationInterface {
-    return Many::of(Timesheets::fetch()->unlimited());   // or ->limitedTo(500)
+    return Many::of(Timesheets::fetch()->unlimited());   // all of them
+},
+'latestTimesheets' => static function (): RelationInterface {
+    return Many::of(Timesheets::fetch()->sortedBy(['date' => 'desc'])->limitedTo(10));
 },
 ```
 
@@ -226,16 +248,21 @@ Related rows are built by PostgreSQL as JSON and decoded by PHP, so some values 
 | Column type | Fetched directly | In related rows |
 |---|---|---|
 | `integer`, `bigint` | `int` | `int` |
-| `numeric` | exact `string`, e.g. `'1234567890.123456789'` | `float`, which may be rounded, e.g. `1234567890.1234567` |
+| `numeric` | exact `string`, e.g. `'1234567890.123456789'` | `int` for an integer that fits PHP's integer range, such as `5`; otherwise `float`, which may be rounded: `5.0`, `1234567890.1234567`, and `9223372036854775808` on 64-bit PHP |
 | `boolean` | `bool` | `bool` |
 | `timestamp` | `'2026-11-01 10:00:00'` | `'2026-11-01T10:00:00'` |
 | `timestamptz` | `'2026-11-01 10:00:00+02'` | `'2026-11-01T10:00:00+02:00'` |
 | `bytea` | binary `string` | hexadecimal `string`, e.g. `'\x0102'` |
-| `json`, `jsonb` | decoded `array` | decoded `array` |
+| `json`, `jsonb` | decoded value: `array`, scalar or `null` | decoded value: `array`, scalar or `null` |
 
-When exact decimals matter in related rows, cast them to text in the target, e.g. with `selecting(['*', '"amount"::text AS "amountText"'])`.
+When exact decimals matter in related rows, select the needed columns in the target and cast the decimal to text under the name that the code reads:
 
-A `One` relation without a related row is `null`, and so is a `Many` relation without related rows, not an empty list. Use `$row['timesheets'] ?? []` to iterate over it.
+```php
+'timesheets' => static function (): RelationInterface {
+    return Many::of(Timesheets::fetch()->selecting(['timesheetUUID', 'date', '"amount"::text AS "amount"']));
+},
+// 'amount' => '1234567890.123456789'
+```
 
 ### Join conditions
 
@@ -311,7 +338,7 @@ A [`ConditionCollection`](#completely-custom-conditions) replaces the condition 
 },
 ```
 
-The second and the third arguments are the conditions for each side of the link table, in the same forms as [above](#join-conditions). In each array, the key is the column of the side that is closer to the source:
+With `via()`, the condition passed to `of()` is ignored: the second and the third arguments of `via()` are the conditions for each side of the link table, in the same forms as [above](#join-conditions). In each array, the key is the column of the side that is closer to the source:
 
 ```php
 // employee.employeeUUID = employee_skill.employeeId AND employee_skill.skillId = skill.skillUUID
@@ -371,10 +398,6 @@ class Employees extends AbstractRelentity
         'projectCount' => static function (): RelationInterface {
             return Many::of(Projects::count())->via('employee_project');
         },
-        // relations of the target are included with with(), at any depth
-        'projectsWithClients' => static function (): RelationInterface {
-            return ManyToMany::of(Projects::fetch()->with('client'))->via('employee_project');
-        },
     ];
 }
 ```
@@ -400,7 +423,7 @@ class Employees extends AbstractRelentity
 }
 ```
 
-`One` supports `fetch()` targets only, and returns the first row according to the ordering of the target.
+`One` supports `fetch()` targets only, and returns the first row according to the ordering of the target. A target can have relations of its own, see [Relations of related rows](#relations-of-related-rows).
 
 ### Choosing relations per query
 
@@ -428,15 +451,9 @@ Employees::fetch()->with(['timesheets' => fn() => Many::of(Timesheets::approved(
 Employees::fetch()->with([
     'timesheetsSince' => fn() => Many::of(Timesheets::fetch()->matching(['"date" >= {#}' => $since])),
 ]);
-
-// the closure receives the source statement, so the target can use its public
-// properties and methods (inPeriod() and $from are defined in the next section)
-Employees::fetch()->inPeriod('2026-11-01', '2026-11-30')->with([
-    'timesheetsSince' => fn(Employees $employees) => Many::of(
-        Timesheets::fetch()->matching(['"date" >= {#}' => $employees->from]),
-    ),
-]);
 ```
+
+The closure also receives the source statement, see [Relations that depend on the source](#relations-that-depend-on-the-source).
 
 ### Relations that depend on the source
 
@@ -480,7 +497,7 @@ The source statement is the same for all rows, so values taken from it apply to 
 
 ### Relations of related rows
 
-`DEFAULT_RELATIONS` apply to the statements you start, not to related rows. A relation whose target is a class, such as `One::of(Employees::class)`, returns related rows without the default relations of that class, so a relation to the entity's own table can be listed in `DEFAULT_RELATIONS`:
+`DEFAULT_RELATIONS` apply to every statement started with `fetch()`, including a target started with `fetch()`, but not to a target given as a class. A relation such as `One::of(Employees::class)` therefore returns related rows without the default relations of that class, so a relation to the entity's own table can be listed in `DEFAULT_RELATIONS`:
 
 ```php
 class Employees extends AbstractRelentity
@@ -511,7 +528,7 @@ Such targets are built as declared, so planning them is up to you: a target star
 
 Any `ConditionCollection` can serve as the condition of a relation, or as either condition of `via()`. It replaces the generated condition completely, and may contain any SQL that is valid in a `WHERE` clause.
 
-Inside a relation, the current row of the source is available under the alias `Many::SOURCE_ALIAS` (the same as `One::SOURCE_ALIAS`), and it contains **all** columns of the source table, not only those that are selected. Columns of tables added with [`joinedWith()`](#joining-tables) are not part of it, and are referred to by their table name. The target is referred to by its table name, and so is a link table in the conditions of `via()`. Always qualify source columns with the alias: unqualified columns refer to the target.
+Inside a relation, the current row of the source is available under the alias `Many::SOURCE_ALIAS` (the same as `One::SOURCE_ALIAS`), and it contains **all** columns of the source table, not only those that are selected. Columns of tables added with [`joinedWith()`](#joining-tables) are not part of it, and are referred to by their table name. The target is referred to by its table name, and so is a link table in the conditions of `via()`. Qualify every column on both sides, with the alias or a table name: an unqualified column may bind to the target, or, in the conditions of `via()`, to the link table.
 
 ```php
 use F4\DB;
@@ -544,16 +561,7 @@ class Employees extends AbstractRelentity
 
 The first condition builds the alias with `DB::escapeIdentifier()`, which is also safe for adapters that quote identifiers differently. The others spell out `"___source___"`, the value of the constant, which is shorter in hand-written SQL.
 
-Values are bound with placeholders, never interpolated:
-
-```php
-ConditionCollection::of(
-    new Fragment('"___source___"."employeeUUID" = "timesheet"."employeeUUID"'),
-    ['"timesheet"."hours" >= {#}' => $minimumHours],
-);
-```
-
-When a condition is needed for a single query only, combine it with `with()`:
+A condition for a single query is passed to `with()`. Values go into placeholders, so they are bound as parameters when the statement is executed:
 
 ```php
 Employees::fetch()->with([
@@ -583,14 +591,14 @@ Employees::fetch()
     ->matching(['department.name' => 'R&D']);
 ```
 
-The third argument is the name of the join method of f4php/db, `join` by default. The methods differ in whether they take a condition, and `joinedWith()` throws an `InvalidArgumentException` when a condition is missing or not allowed:
+For methods that require a condition, `null`, an empty array, or an empty string counts as missing and throws `InvalidArgumentException`. Methods that take no condition accept those values:
 
 | Methods | Condition |
 |---|---|
 | `join`, `innerJoin`, `leftJoin`, `leftOuterJoin`, `rightJoin`, `rightOuterJoin`, `fullOuterJoin`, `joinLateral`, `innerJoinLateral`, `leftJoinLateral` | required |
 | `crossJoin`, `crossJoinLateral`, `naturalJoin`, `naturalLeftOuterJoin`, `naturalRightOuterJoin` | not allowed |
 
-An empty array or an empty string counts as a missing condition. Pass the method by name when there is no condition:
+An empty `ConditionCollection` is not detected, and produces a join without `ON` or `USING`. Pass the method by name when there is no condition:
 
 ```php
 Employees::fetch()->joinedWith('employee_project', method: 'naturalJoin');
@@ -661,7 +669,7 @@ Employees::fetch()
 
 A path into a list of related rows, such as `$.reports.email`, applies to each of them. Relations declared with a customized target follow that target, so `Many::of(Employees::fetch()->revealing('passwordHash'))` returns related rows with `passwordHash`.
 
-`getConcealedColumns()` returns the resulting list, relation paths included:
+`getConcealedColumns()` returns the resolved configuration, relation paths included. It returns it for any statement, `count()` included, although only executed `fetch()` and write statements have rows to conceal:
 
 ```php
 Employees::fetch()->with('manager', 'reports')->getConcealedColumns();
@@ -670,7 +678,7 @@ Employees::fetch()->with('manager', 'reports')->getConcealedColumns();
 
 ### How concealment works
 
-Concealed keys are removed by f4php/db after the statement is executed, before any hook observes the result. Concealed values are therefore still selected and transferred from the database, but they never reach the code that receives the result.
+Concealed keys are removed by f4php/db from the results of executed `fetch()` statements, and from the `RETURNING` rows of executed writes, before any hook observes the result. Concealed values are therefore still selected and transferred from the database, but they never reach the code that receives the result.
 
 This includes statements executed in a `DBTransaction`, where each statement keeps its own concealment. All statements of a transaction run through the adapter of the transaction, not through the `DEFAULT_ADAPTER` of their entities:
 
@@ -683,20 +691,18 @@ use F4\DBTransaction;
 // $changed holds the RETURNING rows, without passwordHash
 ```
 
-With `DB_STRICT_CONCEAL` enabled, every concealed key must be present in every row, so a misspelled key throws a `ConcealedColumnNotFoundException` instead of silently exposing the column. Related rows that are `null`, and empty lists of related rows, are skipped. If a statement selects only some of the columns, with `selecting()`, `DEFAULT_SELECT` or a custom `RETURNING`, include the concealed columns or reveal them:
+With `DB_STRICT_CONCEAL` enabled, every concealed key must be present in every row, so a misspelled key throws a `ConcealedColumnNotFoundException` instead of silently exposing the column. Related rows that are `null`, and empty lists of related rows, are skipped. A statement that returns only some of the columns, with `selecting()`, `DEFAULT_SELECT` or a custom `RETURNING`, must therefore reveal the concealed columns it does not return:
 
 ```php
 Employees::fetch()->selecting(['employeeUUID', 'name'])->revealing('passwordHash')->asTable();
 ```
 
-For `add()`, `change()` and `remove()`, the exception is thrown after the statement is executed. Outside of a transaction, the change is then already saved, and only its result is lost:
+For `add()`, `change()` and `remove()`, the exception is thrown after the statement is executed. Outside of a transaction, the change is then already saved, and only its result is lost. In a `DBTransaction`, the exception rolls the whole transaction back:
 
 ```php
 // passwordHash is concealed by default, but not returned: the row is updated, then the exception is thrown
 Employees::change(['enabled' => false])->matching(['employeeUUID' => $uuid])->asQuery(returning: 'employeeUUID')->asRow();
 ```
-
-When a write returns only some of the columns, reveal the concealed ones that it does not return. Alternatively, execute it in a `DBTransaction`, where the exception rolls the whole transaction back.
 
 Concealed keys are removed before `asValue()` picks its value, so pass it a column name rather than an index: with an index, the position of every column after a concealed one shifts by one.
 
@@ -722,7 +728,7 @@ Relations refer to tables by their names, so a few combinations of names produce
 
 ### Shaping a statement
 
-All of them return the entity.
+All of them mutate and return the entity. Remember to create cloned copies of Relentity objects if used as a template.
 
 | Method | Takes effect for | Description |
 |---|---|---|
@@ -740,7 +746,9 @@ All of them return the entity.
 
 `selecting()`, `with()`, `without()` and `joinedWith()` throw an `InvalidArgumentException` for any other statement, and so do `sortedBy()`, `limitedTo()` and `skipping()` for `count()`, and `limitedTo()` and `skipping()` for `remove()`.
 
-The other combinations are accepted, but have no effect: `change()` ignores `sortedBy()`, `limitedTo()` and `skipping()`, `remove()` ignores `sortedBy()`, `add()` ignores `matching()`, `sortedBy()`, `limitedTo()` and `skipping()`, and `unlimited()` has no effect on any statement other than `fetch()`. In particular, `change($changes)->matching($filters)->limitedTo(1)` changes **every** row that matches `$filters`: narrow the rows with `matching()` instead, e.g. by the primary key.
+The other combinations are accepted, but have no effect: `change()` ignores `sortedBy()`, `limitedTo()` and `skipping()`, `remove()` ignores `sortedBy()`, `add()` ignores `matching()`, `sortedBy()`, `limitedTo()` and `skipping()`, and `unlimited()` has no effect on any statement other than `fetch()`. See the [warning about `change()`](#quick-start).
+
+Methods of the query builder returned by `asQuery()` that resemble these behave differently in places: `select()` adds to the selected columns while `selecting()` replaces them, `where()` also accepts a bare `Fragment` while `matching()` does not, and the builder applies `concealing()` and `revealing()` in the order of the calls, while for an entity `concealing()` always wins.
 
 `matching()`, `selecting()`, `sortedBy()`, `with()`, `without()`, `concealing()` and `revealing()` reject named arguments, since PHP would otherwise accept any name: `matching(status: [...])` would silently filter by a `status` column.
 
@@ -752,9 +760,9 @@ The other combinations are accepted, but have no effect: `change()` ignores `sor
 | `asRow()` | `?array` | executes the statement and returns the first row; not available for `count()` |
 | `asValue(string\|int $column = 0)` | `mixed` | executes the statement and returns one value of the first row; an `int` for `count()` |
 | `execute()` | `void` | executes the statement and discards the result |
-| `asQuery($columns = null, ?string $returning = null)` | `QueryBuilderInterface` | builds the statement without executing it |
+| `asQuery($columns = null, ?string $returning = null)` | `QueryBuilderInterface` | builds the statement without executing it; `$columns` replace the selected columns of `fetch()`, `$returning` replaces `DEFAULT_RETURNING` of `add()`, `change()` and `remove()`, and `null` keeps either |
 | `asSQL()` | `string` | builds the statement and returns its SQL |
-| `getConcealedColumns()` | `list<string>` | the keys and paths that will be concealed, relation paths included |
+| `getConcealedColumns()` | `list<string>` | the resolved concealment configuration, relation paths included; applied only to the rows of executed `fetch()` and write statements |
 
 ### Relations
 
