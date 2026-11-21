@@ -16,6 +16,8 @@ use F4\Relentity\{
 };
 
 interface RelentityInterface {
+    // Must be redefined by every child, checked in the constructor. A self-referencing
+    // constant here would make PHP fail to instantiate children with closures in their constants
     public const string TABLE_NAME = '';
     public const string PRIMARY_KEY = '';
     public const array DEFAULT_RELATIONS = [];

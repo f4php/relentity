@@ -37,17 +37,12 @@ is_string
 
 abstract class AbstractRelentity implements RelentityInterface
 {
-    // Must be redefined by every child, checked in the constructor. A self-referencing
-    // constant here would make PHP fail to instantiate children with closures in their constants
-    public const string TABLE_NAME = '';
-    public const string PRIMARY_KEY = '';
     public const array RELATIONS = [];
     public const null|string|array DEFAULT_SELECT = null;
     public const array DEFAULT_WHERE = [];
     public const array DEFAULT_CONCEALING = [];
     public const array DEFAULT_ORDER = [];
     public const ?string DEFAULT_RETURNING = '*';
-    public const array DEFAULT_RELATIONS = [];
     public const ?int DEFAULT_LIMIT = 100;
     public const ?string DEFAULT_ADAPTER = null;
 
