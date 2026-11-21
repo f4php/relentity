@@ -293,6 +293,30 @@ final class RelentityTest extends TestCase
         $this->assertSame(self::EMPLOYEE_DEFAULTS, Employee::fetch()->asQuery(returning: 'employeeUUID')->asSQL());
     }
 
+    public function testChainedMethodsChangeTheStatement(): void
+    {
+        $employees = Employee::fetch();
+        $employees->matching(['enabled' => true]);
+
+        $this->assertStringContainsString('"enabled" = TRUE', $employees->asSQL());
+    }
+
+    public function testClonedStatementsAreIndependent(): void
+    {
+        $enabled = Employee::fetch()->matching(['enabled' => true])->with('manager');
+        $newest = (clone $enabled)->sortedBy(['hiredAt' => 'desc'])->limitedTo(10)->without('manager');
+        $named = (clone $enabled)->matching(['name' => 'Ann'])->concealing('email');
+
+        $this->assertSame(Employee::fetch()->matching(['enabled' => true])->with('manager')->asSQL(), $enabled->asSQL());
+        $this->assertSame(['passwordHash', '$.manager.passwordHash'], $enabled->getConcealedColumns());
+        $this->assertSame(
+            'SELECT "employeeUUID", "name" FROM "employee" WHERE "deleted" = FALSE AND "enabled" = TRUE ORDER BY "hiredAt" DESC LIMIT 10',
+            $newest->asSQL(),
+        );
+        $this->assertStringContainsString('"enabled" = TRUE AND "name" = \'Ann\'', $named->asSQL());
+        $this->assertSame(['passwordHash', '$.manager.passwordHash', 'email'], $named->getConcealedColumns());
+    }
+
     public function testStatementsCanBeBuiltRepeatedly(): void
     {
         $employees = Employee::fetch()->matching(['enabled' => true])->with('manager');

@@ -370,7 +370,25 @@ final class RelationTest extends TestCase
             'more than one pair' => [['a' => 'b', 'c' => 'd']],
             'an empty array' => [[]],
             'a value that is not a string' => [['a' => 1]],
+            'a numeric key' => [[2 => 'id']],
+            'an empty key' => [['' => 'id']],
+            'an empty value' => [['id' => '']],
         ];
+    }
+
+    public function testEmptyStringCondition(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Condition as string must be a non-empty column name');
+        BareEmployee::fetch()->with(['x' => fn() => Many::of(Plain::class, '')])->asQuery();
+    }
+
+    public function testViaAcceptsTheTableAsANamedArgument(): void
+    {
+        $this->assertSame(
+            BareEmployee::fetch()->with(['x' => fn() => Many::of(Plain::class)->via('link')])->asSQL(),
+            BareEmployee::fetch()->with(['x' => fn() => Many::of(Plain::class)->via(table: 'link')])->asSQL(),
+        );
     }
 
     #[DataProvider('invalidConditionProvider')]
@@ -413,9 +431,19 @@ final class RelationTest extends TestCase
                 'Relation customization must be a callable',
             ],
             'a customization without an alias' => [
-                static fn() => BareEmployee::fetch()->with([fn() => Many::of(Plain::class)])->asQuery(),
+                static fn() => BareEmployee::fetch()->with([fn() => Many::of(Plain::class)]),
                 InvalidArgumentException::class,
-                'Relation alias must be non-empty string',
+                'Relation customization must have an alias',
+            ],
+            'a customization with a numeric alias' => [
+                static fn() => BareEmployee::fetch()->with(['1' => fn() => Many::of(Plain::class)]),
+                InvalidArgumentException::class,
+                'Relation customization must have an alias',
+            ],
+            'a customization with an empty alias' => [
+                static fn() => BareEmployee::fetch()->with(['' => fn() => Many::of(Plain::class)]),
+                InvalidArgumentException::class,
+                'Relation customization must have an alias',
             ],
         ];
     }

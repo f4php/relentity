@@ -20,7 +20,6 @@ use F4\Relentity\{
 };
 
 use function
-array_is_list,
 array_key_first,
 count,
 current,
@@ -97,8 +96,18 @@ abstract class AbstractRelation implements RelationInterface
         if ($condition instanceof ConditionCollection) {
             return $condition;
         }
-        if (is_array($condition) && (count($condition) !== 1 || array_is_list($condition) || !is_string(current($condition)))) {
-            throw new InvalidArgumentException('Condition as array must contain exactly one array key with one value');
+        if (
+            is_array($condition)
+            && (
+                count($condition) !== 1
+                || !is_string($key = array_key_first($condition)) || $key === ''
+                || !is_string($value = current($condition)) || $value === ''
+            )
+        ) {
+            throw new InvalidArgumentException('Condition as array must contain exactly one array key with one value, both non-empty column names');
+        }
+        if ($condition === '') {
+            throw new InvalidArgumentException('Condition as string must be a non-empty column name');
         }
         [$sourceColumn, $targetColumn] = match (true) {
             is_array($condition) => [array_key_first($condition), current($condition)],

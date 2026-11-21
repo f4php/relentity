@@ -65,7 +65,7 @@ abstract class AbstractRelentity implements RelentityInterface
     private array $relations = [];
     private ?AdapterInterface $adapter = null;
 
-    final protected function __construct(private ActionType $actionType, private mixed $parameters = null)
+    final protected function __construct(private ActionType $actionType, mixed $parameters = null)
     {
         if (static::TABLE_NAME === '') {
             throw new RelentityException(static::class . ' must define TABLE_NAME');
@@ -412,7 +412,7 @@ abstract class AbstractRelentity implements RelentityInterface
         foreach ($relations as $relation) {
             if (is_array($relation)) {
                 foreach ($relation as $alias => $definition) {
-                    if (is_numeric($definition)) {
+                    if (!is_string($alias) || $alias === '' || is_numeric($alias)) {
                         throw new InvalidArgumentException('Relation customization must have an alias');
                     }
                     if (!is_callable($definition)) {

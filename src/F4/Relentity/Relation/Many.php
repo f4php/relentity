@@ -26,11 +26,14 @@ class Many extends AbstractRelation implements RelationInterface {
     protected string|RelentityInterface $viaEntity;
     protected null|string|array|ConditionCollection $viaSourceCondition;
     protected null|string|array|ConditionCollection $viaTargetCondition;
-    public function via(string|RelentityInterface $entity, null|string|array|ConditionCollection $sourceCondition = null, null|string|array|ConditionCollection $targetCondition = null): static {
-        if($entity instanceof RelentityInterface && $entity->getActionType() !== ActionType::Fetch) {
+    /**
+     * @param string|RelentityInterface $table a link table name, or a fetch() statement of a link entity
+     */
+    public function via(string|RelentityInterface $table, null|string|array|ConditionCollection $sourceCondition = null, null|string|array|ConditionCollection $targetCondition = null): static {
+        if($table instanceof RelentityInterface && $table->getActionType() !== ActionType::Fetch) {
             throw new InvalidArgumentException(__FUNCTION__ . '() requires Relentity objects to have Fetch action type');
         }
-        $this->viaEntity =  $entity;
+        $this->viaEntity = $table;
         $this->viaSourceCondition = $sourceCondition;
         $this->viaTargetCondition = $targetCondition;
         return $this;

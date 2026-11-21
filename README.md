@@ -6,10 +6,12 @@ An entity class describes a table: its primary key, default filters, ordering an
 
 Relations are compiled into `LEFT JOIN LATERAL` subqueries that return related rows as JSON, so a single query returns each row together with its related data, and joining relations never multiplies the rows of the main entity.
 
+- [Installation](#installation)
 - [Quick start](#quick-start)
 - [Entity defaults](#entity-defaults)
 - [Relations](#relations)
   - [Declaring relations](#declaring-relations)
+  - [Values of related rows](#values-of-related-rows)
   - [Join conditions](#join-conditions)
   - [Link tables](#link-tables)
   - [Customizing the target](#customizing-the-target)
@@ -19,6 +21,37 @@ Relations are compiled into `LEFT JOIN LATERAL` subqueries that return related r
 - [Joining tables](#joining-tables)
 - [Concealing columns](#concealing-columns)
 - [Reference](#reference)
+
+## Installation
+
+```bash
+composer require f4php/relentity
+```
+
+Relentity requires PHP 8.5.13 or later, and PostgreSQL: relations rely on `LATERAL` joins and `jsonb`. The connection is configured by the constants of an `F4\Config` class, as described in the [configuration of f4php/db](https://github.com/f4php/db#configuration). Within the F4 framework that class already exists; in a standalone project, define it before the first statement is executed:
+
+```php
+namespace F4;
+
+class Config
+{
+    public const string DB_ADAPTER_CLASS = \F4\DB\Adapter\PostgresqlAdapter::class;
+    public const string DB_HOST = 'localhost';
+    public const string DB_PORT = '5432';
+    public const string DB_NAME = 'application';
+    public const string DB_USERNAME = 'app';
+    #[\SensitiveParameter]
+    public const string DB_PASSWORD = 'secret';
+    public const string DB_CHARSET = 'UTF8';
+    public const string DB_SCHEMA = '';
+    public const ?string DB_APP_NAME = null;
+    public const bool DB_PERSIST = true;
+    public const bool DB_OVERWRITE_DUPLICATE_RESPONSE_COLUMNS = false;
+    public const bool DB_STRICT_CONCEAL = true;
+    public const bool DEBUG_MODE = false;
+    public const string TIMEZONE = '';
+}
+```
 
 ## Quick start
 
@@ -54,6 +87,17 @@ Employees::fetch()->matching(['email' => $email])->asSQL();
 ```
 
 `matching()` accepts anything that `where()` of f4php/db accepts: `['column' => $value]`, a list for `IN`, `null` for `IS NULL`, an expression with a placeholder such as `['"date" >= {#}' => $since]`, or a `ConditionCollection`. Each call adds to the previous ones with `AND`.
+
+Chained methods change the statement they are called on and return it, so a statement that is reused must be cloned before it is changed further:
+
+```php
+$enabled = Employees::fetch()->matching(['enabled' => true]);
+
+$newest = (clone $enabled)->sortedBy(['hiredAt' => 'desc'])->limitedTo(10);   // $enabled is unchanged
+$named = (clone $enabled)->matching(['name' => $name]);
+
+$enabled->limitedTo(10);   // without clone: changes $enabled itself
+```
 
 ## Entity defaults
 
@@ -156,6 +200,32 @@ Every row then contains one additional key per relation, already decoded from JS
 
 The entity that declares a relation is its **source**, the related entity is its **target**. The closure is called with the source instance whenever the relation is used, so a relation is built anew for every query. PHP does not allow arrow functions (`fn`) in constants, so use `static function` or a [first-class callable](#customizing-the-target).
 
+The `DEFAULT_LIMIT` of the target, `100` unless redefined, limits **each** list of related rows. An employee with 150 timesheets therefore gets the first 100 of them, while a [`count()` relation](#customizing-the-target) of the same timesheets returns 150. Lift or change the limit on the target:
+
+```php
+'timesheets' => static function (): RelationInterface {
+    return Many::of(Timesheets::fetch()->unlimited());   // or ->limitedTo(500)
+},
+```
+
+### Values of related rows
+
+Related rows are built by PostgreSQL as JSON and decoded by PHP, so some values have a different type or format than the same column fetched directly:
+
+| Column type | Fetched directly | In related rows |
+|---|---|---|
+| `integer`, `bigint` | `int` | `int` |
+| `numeric` | exact `string`, e.g. `'1234567890.123456789'` | `float`, which may be rounded, e.g. `1234567890.1234567` |
+| `boolean` | `bool` | `bool` |
+| `timestamp` | `'2026-11-01 10:00:00'` | `'2026-11-01T10:00:00'` |
+| `timestamptz` | `'2026-11-01 10:00:00+02'` | `'2026-11-01T10:00:00+02:00'` |
+| `bytea` | binary `string` | hexadecimal `string`, e.g. `'\x0102'` |
+| `json`, `jsonb` | decoded `array` | decoded `array` |
+
+When exact decimals matter in related rows, cast them to text in the target, e.g. with `selecting(['*', '"amount"::text AS "amountText"'])`.
+
+A `One` relation without a related row is `null`, and so is a `Many` relation without related rows, not an empty list. Use `$row['timesheets'] ?? []` to iterate over it.
+
 ### Join conditions
 
 Without a condition, a relation follows the naming convention of the primary keys:
@@ -183,6 +253,39 @@ The second argument of `of()` changes the columns:
 ```
 
 In the array form the key is always the column of the source and the value is the column of the target. As `manager` and `reports` show, the source and the target may be the same table.
+
+With the common schema convention of an `id` primary key and `<table>_id` foreign keys, every relation names its columns:
+
+```php
+class Departments extends AbstractRelentity
+{
+    public const string TABLE_NAME = 'department';
+    public const string PRIMARY_KEY = 'id';
+    public const array RELATIONS = [
+        'employees' => static function (): RelationInterface {
+            return Many::of(Employees::class, ['id' => 'department_id']);   // department.id = employee.department_id
+        },
+    ];
+}
+
+class Employees extends AbstractRelentity
+{
+    public const string TABLE_NAME = 'employee';
+    public const string PRIMARY_KEY = 'id';
+    public const array RELATIONS = [
+        'department' => static function (): RelationInterface {
+            return One::of(Departments::class, ['department_id' => 'id']);  // employee.department_id = department.id
+        },
+        'projects' => static function (): RelationInterface {
+            return ManyToMany::of(Projects::class)->via(
+                'employee_project',
+                ['id' => 'employee_id'],                                     // employee.id = employee_project.employee_id
+                ['project_id' => 'id'],                                      // employee_project.project_id = project.id
+            );
+        },
+    ];
+}
+```
 
 A [`ConditionCollection`](#completely-custom-conditions) replaces the condition completely.
 
