@@ -11,13 +11,17 @@ use F4\Relentity\Relation\{Many, RelationInterface};
  */
 class PeriodEmployee extends BareEmployee
 {
-    public ?array $period = null;
+    public private(set) ?string $from = null;
+    public private(set) ?string $to = null;
 
     public const array RELATIONS = [
         'timesheets' => static function (PeriodEmployee $employees): RelationInterface {
             $timesheets = Timesheet::fetch();
-            if ($employees->period !== null) {
-                $timesheets->matching(['"date" BETWEEN {#} AND {#}' => $employees->period]);
+            if ($employees->from !== null && $employees->to !== null) {
+                $timesheets->matching(
+                    ['"date" >= {#}' => $employees->from],
+                    ['"date" <= {#}' => $employees->to],
+                );
             }
             return Many::of($timesheets);
         },
@@ -25,7 +29,8 @@ class PeriodEmployee extends BareEmployee
 
     public function inPeriod(string $from, string $to): static
     {
-        $this->period = [$from, $to];
+        $this->from = $from;
+        $this->to = $to;
         return $this;
     }
 }

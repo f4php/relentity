@@ -268,7 +268,7 @@ final class RelationTest extends TestCase
         );
     }
 
-    private const string PERIOD_TIMESHEETS = 'SELECT "timesheet".* FROM "timesheet" WHERE "date" BETWEEN \'2026-11-01\' AND \'2026-11-30\' AND ("___source___"."employeeUUID" = "timesheet"."employeeUUID") ORDER BY "date" DESC LIMIT 100';
+    private const string PERIOD_TIMESHEETS = 'SELECT "timesheet".* FROM "timesheet" WHERE "date" >= \'2026-11-01\' AND "date" <= \'2026-11-30\' AND ("___source___"."employeeUUID" = "timesheet"."employeeUUID") ORDER BY "date" DESC LIMIT 100';
 
     public function testRelationDependsOnThePropertiesOfTheSource(): void
     {
@@ -315,7 +315,7 @@ final class RelationTest extends TestCase
         foreach ($received as $source) {
             $this->assertInstanceOf(PeriodEmployee::class, $source);
             $this->assertNotSame($top, $source);
-            $this->assertSame(['2026-11-01', '2026-11-30'], $source->period);
+            $this->assertSame(['2026-11-01', '2026-11-30'], [$source->from, $source->to]);
         }
     }
 

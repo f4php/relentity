@@ -6,23 +6,30 @@ An entity class describes a table: its primary key, default filters, ordering an
 
 Relations are compiled into `LEFT JOIN LATERAL` subqueries that return related rows as JSON, so a single query returns each row together with its related data, and joining relations never multiplies the rows of the main entity.
 
-- [Installation](#installation)
-- [Quick start](#quick-start)
-- [Entity defaults](#entity-defaults)
-- [Relations](#relations)
-  - [Declaring relations](#declaring-relations)
-  - [Values of related rows](#values-of-related-rows)
-  - [Join conditions](#join-conditions)
-  - [Link tables](#link-tables)
-  - [Customizing the target](#customizing-the-target)
-  - [Choosing relations per query](#choosing-relations-per-query)
-  - [Relations that depend on the source](#relations-that-depend-on-the-source)
-  - [Relations of related rows](#relations-of-related-rows)
-  - [Completely custom conditions](#completely-custom-conditions)
-- [Joining tables](#joining-tables)
-- [Concealing columns](#concealing-columns)
-- [Limitations](#limitations)
-- [Reference](#reference)
+- [Overview](#overview)
+  - [Installation](#installation)
+  - [Quick start](#quick-start)
+  - [Entity defaults](#entity-defaults)
+  - [Relations](#relations)
+    - [Declaring relations](#declaring-relations)
+    - [Values of related rows](#values-of-related-rows)
+    - [Join conditions](#join-conditions)
+    - [Link tables](#link-tables)
+    - [Customizing the target](#customizing-the-target)
+    - [Choosing relations per query](#choosing-relations-per-query)
+    - [Relations that depend on the source](#relations-that-depend-on-the-source)
+    - [Relations of related rows](#relations-of-related-rows)
+    - [Completely custom conditions](#completely-custom-conditions)
+  - [Joining tables](#joining-tables)
+  - [Concealing columns](#concealing-columns)
+    - [Concealing related rows](#concealing-related-rows)
+    - [How concealment works](#how-concealment-works)
+  - [Limitations](#limitations)
+  - [Reference](#reference)
+    - [Starting a statement](#starting-a-statement)
+    - [Shaping a statement](#shaping-a-statement)
+    - [Ending a statement](#ending-a-statement)
+    - [Relations](#relations-1)
 
 ## Installation
 
@@ -421,6 +428,14 @@ Employees::fetch()->with(['timesheets' => fn() => Many::of(Timesheets::approved(
 Employees::fetch()->with([
     'timesheetsSince' => fn() => Many::of(Timesheets::fetch()->matching(['"date" >= {#}' => $since])),
 ]);
+
+// the closure receives the source statement, so the target can use its public
+// properties and methods (inPeriod() and $from are defined in the next section)
+Employees::fetch()->inPeriod('2026-11-01', '2026-11-30')->with([
+    'timesheetsSince' => fn(Employees $employees) => Many::of(
+        Timesheets::fetch()->matching(['"date" >= {#}' => $employees->from]),
+    ),
+]);
 ```
 
 ### Relations that depend on the source
@@ -431,13 +446,17 @@ Every relation closure, declared in `RELATIONS` or passed to `with()`, receives 
 class Employees extends AbstractRelentity
 {
     // ...
-    public ?array $period = null;
+    public private(set) ?string $from = null;
+    public private(set) ?string $to = null;
 
     public const array RELATIONS = [
         'timesheets' => static function (Employees $employees): RelationInterface {
             $timesheets = Timesheets::fetch();
-            if ($employees->period !== null) {
-                $timesheets->matching(['"date" BETWEEN {#} AND {#}' => $employees->period]);
+            if ($employees->from !== null && $employees->to !== null) {
+                $timesheets->matching(
+                    ['"date" >= {#}::date' => $employees->from],
+                    ['"date" <= {#}::date' => $employees->to],
+                );
             }
             return Many::of($timesheets);
         },
@@ -445,7 +464,8 @@ class Employees extends AbstractRelentity
 
     public function inPeriod(string $from, string $to): static
     {
-        $this->period = [$from, $to];
+        $this->from = $from;
+        $this->to = $to;
         return $this;
     }
 }
