@@ -24,6 +24,7 @@ Relations are compiled into `LEFT JOIN LATERAL` subqueries that return related r
   - [Concealing columns](#concealing-columns)
     - [Concealing related rows](#concealing-related-rows)
     - [How concealment works](#how-concealment-works)
+  - [Choosing an adapter](#choosing-an-adapter)
   - [Limitations](#limitations)
   - [Reference](#reference)
     - [Starting a statement](#starting-a-statement)
@@ -159,7 +160,7 @@ Employees::fetch()->enabled()->asSQL();
 | `DEFAULT_RETURNING` | `'*'` | `add()`, `change()`, `remove()` | `asQuery(returning: ...)`; a `null` constant means no `RETURNING`, while `asQuery(returning: null)` keeps the constant |
 | `DEFAULT_RELATIONS` | none | `fetch()` | extended by `with()`, reduced by `without()` |
 | `DEFAULT_CONCEALING` | none | `fetch()`, and `RETURNING` of `add()`, `change()`, `remove()` | extended by `concealing()`, reduced by `revealing()`, see [Concealing columns](#concealing-columns) |
-| `DEFAULT_ADAPTER` | `DB_ADAPTER_CLASS` of `F4\Config` | all | a class name implementing `F4\DB\Adapter\AdapterInterface`, instantiated without arguments for every statement |
+| `DEFAULT_ADAPTER` | `DB_ADAPTER_CLASS` of `F4\Config` | all | a class name implementing `F4\DB\Adapter\AdapterInterface`, instantiated without arguments for every statement; `asQuery()->useAdapter()`, see [Choosing an adapter](#choosing-an-adapter) |
 
 `DEFAULT_WHERE` also applies to `change()` and `remove()`, so with the definition above `Employees::remove()` never touches rows that are marked as deleted.
 
@@ -705,6 +706,33 @@ Employees::change(['enabled' => false])->matching(['employeeUUID' => $uuid])->as
 ```
 
 Concealed keys are removed before `asValue()` picks its value, so pass it a column name rather than an index: with an index, the position of every column after a concealed one shifts by one.
+
+## Choosing an adapter
+
+Every statement runs through an f4php/db adapter, which connects to the database, quotes identifiers and executes the statement. By default it is the `DB_ADAPTER_CLASS` of `F4\Config`. An entity can name another class in `DEFAULT_ADAPTER`, which is then instantiated without arguments for every statement of that entity:
+
+```php
+class AuditLog extends AbstractRelentity
+{
+    public const string TABLE_NAME = 'audit_log';
+    public const string PRIMARY_KEY = 'auditLogUUID';
+    public const ?string DEFAULT_ADAPTER = AuditDatabaseAdapter::class;
+}
+```
+
+To run a single statement through a specific adapter instance, such as one with its own connection string, call `useAdapter()` on the query builder returned by `asQuery()`, and execute the statement there:
+
+```php
+use F4\DB\Adapter\PostgresqlAdapter;
+
+$replica = new PostgresqlAdapter('host=replica.internal dbname=application user=reporting');
+
+Employees::fetch()->with('department')->asQuery()->useAdapter($replica)->asTable();
+```
+
+The adapter given to `useAdapter()` replaces the `DEFAULT_ADAPTER` of the entity for the whole statement, relation subqueries included, and the concealment of the statement still applies. Relentity itself has no `useAdapter()`: the adapter is chosen after `asQuery()`, so the statement is executed with the methods of the query builder, `asTable()`, `asRow()`, `asValue()` or `commit()`.
+
+A `DBTransaction` runs every statement added to it through the adapter of the transaction, whatever `DEFAULT_ADAPTER` or `useAdapter()` chose, see [How concealment works](#how-concealment-works).
 
 ## Limitations
 
