@@ -16,6 +16,7 @@ Relations are compiled into `LEFT JOIN LATERAL` subqueries that return related r
   - [Link tables](#link-tables)
   - [Customizing the target](#customizing-the-target)
   - [Choosing relations per query](#choosing-relations-per-query)
+  - [Relations that depend on the source](#relations-that-depend-on-the-source)
   - [Relations of related rows](#relations-of-related-rows)
   - [Completely custom conditions](#completely-custom-conditions)
 - [Joining tables](#joining-tables)
@@ -201,7 +202,7 @@ Every row then contains one additional key per relation, already decoded from JS
 
 Each relation adds one column, named after its alias, to the selected columns. Without `DEFAULT_SELECT`, an entity selects all columns of its own table, `"employee".*`. Avoid a bare `*` together with relations: it also returns an internal `___relation_rows___` column of every relation.
 
-The entity that declares a relation is its **source**, the related entity is its **target**. The closure is called with the source instance whenever the relation is used, so a relation is built anew for every query. PHP does not allow arrow functions (`fn`) in constants, so use `static function` or a [first-class callable](#customizing-the-target).
+The entity that declares a relation is its **source**, the related entity is its **target**. The closure is called with the source statement whenever the relation is used, so a relation is built anew for every query, and can [depend on the source](#relations-that-depend-on-the-source). PHP does not allow arrow functions (`fn`) in constants, so use `static function` or a [first-class callable](#customizing-the-target).
 
 The `DEFAULT_LIMIT` of the target, `100` unless redefined, limits **each** list of related rows. An employee with 150 timesheets therefore gets the first 100 of them, while a [`count()` relation](#customizing-the-target) of the same timesheets returns 150. Lift or change the limit on the target:
 
@@ -421,6 +422,41 @@ Employees::fetch()->with([
     'timesheetsSince' => fn() => Many::of(Timesheets::fetch()->matching(['"date" >= {#}' => $since])),
 ]);
 ```
+
+### Relations that depend on the source
+
+Every relation closure, declared in `RELATIONS` or passed to `with()`, receives the source statement as its argument. The target can therefore use public properties and methods of the source, such as a period chosen for the query:
+
+```php
+class Employees extends AbstractRelentity
+{
+    // ...
+    public ?array $period = null;
+
+    public const array RELATIONS = [
+        'timesheets' => static function (Employees $employees): RelationInterface {
+            $timesheets = Timesheets::fetch();
+            if ($employees->period !== null) {
+                $timesheets->matching(['"date" BETWEEN {#} AND {#}' => $employees->period]);
+            }
+            return Many::of($timesheets);
+        },
+    ];
+
+    public function inPeriod(string $from, string $to): static
+    {
+        $this->period = [$from, $to];
+        return $this;
+    }
+}
+
+Employees::fetch()->with('timesheets')->inPeriod('2026-11-01', '2026-11-30')->asTable();
+// each employee with their timesheets of November only
+```
+
+The closure is called when the statement is built, by `asQuery()` or by the method that executes it, so the order of `with()` and `inPeriod()` does not matter, and a [cloned](#quick-start) statement keeps the property. Relations of a target statement, such as `Many::of(Employees::fetch()->with('timesheets'))`, receive that target statement, or a copy of it with the same properties, as their source. Their closures may be called more than once while a statement is built, so they should only read the source, not change it.
+
+The source statement is the same for all rows, so values taken from it apply to every row alike. To compare with the columns of each source row, use the [source alias](#completely-custom-conditions) in a condition instead.
 
 ### Relations of related rows
 

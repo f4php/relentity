@@ -21,6 +21,7 @@ use F4\Tests\Relentity\Fixtures\{
     DefaultRelationEmployee,
     Employee,
     InvalidRelations,
+    PeriodEmployee,
     Plain,
     SelfReferencingDefault,
     Timesheet,
@@ -265,6 +266,57 @@ final class RelationTest extends TestCase
             self::employeeWith('since', self::many('since', 'employee', 'SELECT "timesheet".* FROM "timesheet" WHERE "date" >= \'2026-11-01\' AND ("___source___"."employeeUUID" = "timesheet"."employeeUUID") ORDER BY "date" DESC LIMIT 100')),
             BareEmployee::fetch()->with(['since' => fn() => Many::of(Timesheet::fetch()->matching(['"date" >= {#}' => '2026-11-01']))])->asSQL(),
         );
+    }
+
+    private const string PERIOD_TIMESHEETS = 'SELECT "timesheet".* FROM "timesheet" WHERE "date" BETWEEN \'2026-11-01\' AND \'2026-11-30\' AND ("___source___"."employeeUUID" = "timesheet"."employeeUUID") ORDER BY "date" DESC LIMIT 100';
+
+    public function testRelationDependsOnThePropertiesOfTheSource(): void
+    {
+        $this->assertSame(
+            self::employeeWith('timesheets', self::many('timesheets', 'employee', self::PERIOD_TIMESHEETS)),
+            PeriodEmployee::fetch()->inPeriod('2026-11-01', '2026-11-30')->with('timesheets')->asSQL(),
+        );
+    }
+
+    public function testSourcePropertiesSetAfterWithApply(): void
+    {
+        $this->assertSame(
+            PeriodEmployee::fetch()->inPeriod('2026-11-01', '2026-11-30')->with('timesheets')->asSQL(),
+            PeriodEmployee::fetch()->with('timesheets')->inPeriod('2026-11-01', '2026-11-30')->asSQL(),
+        );
+    }
+
+    public function testRelationWithoutSourcePropertiesIsUnfiltered(): void
+    {
+        $this->assertSame(
+            self::employeeWith('timesheets', self::many('timesheets', 'employee', 'SELECT "timesheet".* FROM "timesheet" WHERE ("___source___"."employeeUUID" = "timesheet"."employeeUUID") ORDER BY "date" DESC LIMIT 100')),
+            PeriodEmployee::fetch()->with('timesheets')->asSQL(),
+        );
+    }
+
+    public function testClonedSourceKeepsItsProperties(): void
+    {
+        $employees = PeriodEmployee::fetch()->with('timesheets')->inPeriod('2026-11-01', '2026-11-30');
+
+        $this->assertStringContainsString(self::PERIOD_TIMESHEETS, (clone $employees)->limitedTo(10)->asSQL());
+    }
+
+    public function testNestedRelationReceivesItsOwnSource(): void
+    {
+        $received = [];
+        $target = PeriodEmployee::fetch()->inPeriod('2026-11-01', '2026-11-30')->with(['nested' => function (RelentityInterface $source) use (&$received): RelationInterface {
+            $received[] = $source;
+            return Many::of(Plain::class);
+        }]);
+        $top = BareEmployee::fetch()->with(['x' => fn() => Many::of($target)]);
+        $top->asQuery();
+
+        $this->assertNotEmpty($received);
+        foreach ($received as $source) {
+            $this->assertInstanceOf(PeriodEmployee::class, $source);
+            $this->assertNotSame($top, $source);
+            $this->assertSame(['2026-11-01', '2026-11-30'], $source->period);
+        }
     }
 
     public function testRelationDefinitionReceivesTheSource(): void
