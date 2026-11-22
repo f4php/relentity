@@ -114,7 +114,31 @@ Employees::fetch()->matching(['enabled' => true])->asQuery()->where(['"name" ILI
 // SELECT "employee".* FROM "employee" WHERE "enabled" = TRUE AND "name" ILIKE '...' LIMIT 100
 ```
 
-`matching()` accepts filter arrays and `ConditionCollection` objects: `['column' => $value]`, a list for `IN`, `null` for `IS NULL`, an expression with a placeholder such as `['"date" >= {#}' => $since]`. A `Fragment` is wrapped in a collection, e.g. `matching(ConditionCollection::of(new Fragment('"hiredAt" > now() - interval \'1 year\'')))`. Each call adds to the previous ones with `AND`.
+`matching()` accepts filter arrays and `ConditionCollection` objects: `['column' => $value]`, a list for `IN`, `null` for `IS NULL`, an expression with a placeholder such as `['"date" >= {#}' => $since]`. Each call adds to the previous ones with `AND`.
+
+An expression without parameters can be passed to `ConditionCollection::of()` as a plain string. A `Fragment` is needed only when the expression has parameters, and in a filter array a parameterized expression is simply a key with a placeholder, as above:
+
+```php
+Employees::fetch()->matching(ConditionCollection::of('"hiredAt" > now() - interval \'1 year\''));
+```
+
+A `ConditionCollection` joins its conditions with `AND`, and an `AnyConditionCollection` joins them with `OR`. They can be nested, and short aliases make nested conditions easier to read:
+
+```php
+use F4\DB\{
+    AnyConditionCollection as any,
+    ConditionCollection as all,
+};
+
+Employees::fetch()->matching(all::of([
+    'enabled' => true,
+    any::of([
+        'role' => 'admin',
+        '"hiredAt" >= {#}' => $since,
+    ]),
+]));
+// SELECT "employee".* FROM "employee" WHERE ("enabled" = TRUE AND ("role" = 'admin' OR "hiredAt" >= '...')) LIMIT 100
+```
 
 Chained methods change the statement they are called on and return it, so a statement that is reused must be cloned before it is changed further:
 
