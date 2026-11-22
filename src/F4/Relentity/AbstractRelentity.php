@@ -75,8 +75,11 @@ abstract class AbstractRelentity implements RelentityInterface
             case ActionType::Change:
                 $this->changes = ((array) $parameters) or throw new InvalidArgumentException("Missing data for change action");
                 break;
-            case ActionType::Count:
-                $this->select = new SelectExpressionCollection(new Fragment('COUNT(*) AS {#::#}', [DB::escapeIdentifier(static::COUNT_ALIAS)]));
+            case ActionType::Aggregate:
+                $this->select = match ($parameters) {
+                    null, '', [] => throw new InvalidArgumentException('Missing expressions for aggregate action'),
+                    default => $parameters,
+                };
                 break;
             case ActionType::Fetch:
                 $this->select = $parameters ?? static::DEFAULT_SELECT ?? [];
@@ -113,9 +116,20 @@ abstract class AbstractRelentity implements RelentityInterface
     {
         return new static(ActionType::Change, $changes);
     }
+    /**
+     * Starts a statement that returns aggregate expressions, e.g. 'sum("hours") AS "hours"',
+     * in the same forms as fetch() accepts columns. DEFAULT_ORDER and DEFAULT_LIMIT do not apply.
+     */
+    public static function aggregate(string|array|SelectExpressionCollection $expressions): static
+    {
+        return new static(ActionType::Aggregate, $expressions);
+    }
+    /**
+     * Shorthand for aggregate() of COUNT(*) AS "count"
+     */
     public static function count(): static
     {
-        return new static(ActionType::Count);
+        return static::aggregate(new SelectExpressionCollection(new Fragment('COUNT(*) AS {#::#}', [DB::escapeIdentifier(static::COUNT_ALIAS)])));
     }
     public static function add(array $values): static
     {
@@ -246,7 +260,7 @@ abstract class AbstractRelentity implements RelentityInterface
                     $relation->appendJoinExpression($query, $alias);
                 }
                 break;
-            case ActionType::Count:
+            case ActionType::Aggregate:
                 $query = new DB();
                 $query = $query
                     ->select($this->select)
@@ -290,9 +304,6 @@ abstract class AbstractRelentity implements RelentityInterface
     }
     public function asRow(): ?array
     {
-        if ($this->actionType === ActionType::Count) {
-            throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
-        }
         return $this->asQuery()->asRow();
     }
     public function asSQL(): string
@@ -301,18 +312,11 @@ abstract class AbstractRelentity implements RelentityInterface
     }
     public function asTable(): array
     {
-        if ($this->actionType === ActionType::Count) {
-            throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
-        }
         return $this->asQuery()->asTable();
     }
     public function asValue(string|int $column = 0): mixed
     {
-        $result = $this->asQuery()->asValue($column);
-        return match ($this->actionType) {
-            ActionType::Count => (int) $result,
-            default => $result,
-        };
+        return $this->asQuery()->asValue($column);
     }
     public function concealing(string|array ...$columns): static
     {
@@ -362,7 +366,7 @@ abstract class AbstractRelentity implements RelentityInterface
     }
     public function limitedTo(?int $rows, ?int $skipping = null): static
     {
-        if (in_array($this->actionType, [ActionType::Count, ActionType::Remove], strict: true)) {
+        if (in_array($this->actionType, [ActionType::Aggregate, ActionType::Remove], strict: true)) {
             throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
         }
         $this->limit = $rows;
@@ -373,7 +377,7 @@ abstract class AbstractRelentity implements RelentityInterface
     }
     public function skipping(int $rows): static
     {
-        if (in_array($this->actionType, [ActionType::Count, ActionType::Remove], strict: true)) {
+        if (in_array($this->actionType, [ActionType::Aggregate, ActionType::Remove], strict: true)) {
             throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
         }
         $this->offset = $rows;
@@ -391,7 +395,7 @@ abstract class AbstractRelentity implements RelentityInterface
     }
     public function sortedBy(array|OrderCollection ...$criteria): static
     {
-        if (in_array($this->actionType, [ActionType::Count], strict: true)) {
+        if (in_array($this->actionType, [ActionType::Aggregate], strict: true)) {
             throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
         }
         array_is_list($criteria) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
@@ -400,7 +404,7 @@ abstract class AbstractRelentity implements RelentityInterface
     }
     public function with(string|array ...$relations): static
     {
-        if (in_array($this->actionType, [ActionType::Add, ActionType::Change, ActionType::Count, ActionType::Remove], strict: true)) {
+        if (in_array($this->actionType, [ActionType::Add, ActionType::Change, ActionType::Aggregate, ActionType::Remove], strict: true)) {
             throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
         }
         array_is_list($relations) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
@@ -425,7 +429,7 @@ abstract class AbstractRelentity implements RelentityInterface
     }
     public function without(string ...$relations): static
     {
-        if (in_array($this->actionType, [ActionType::Add, ActionType::Change, ActionType::Count, ActionType::Remove], strict: true)) {
+        if (in_array($this->actionType, [ActionType::Add, ActionType::Change, ActionType::Aggregate, ActionType::Remove], strict: true)) {
             throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
         }
         array_is_list($relations) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');

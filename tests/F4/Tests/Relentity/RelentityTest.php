@@ -64,6 +64,14 @@ final class RelentityTest extends TestCase
                 static fn() => Employee::count(),
                 'SELECT COUNT(*) AS "count" FROM "employee" WHERE "deleted" = FALSE',
             ],
+            'aggregate applies DEFAULT_WHERE only' => [
+                static fn() => Employee::aggregate(['max("hiredAt") AS "latest"', 'count(DISTINCT "departmentUUID") AS "departments"']),
+                'SELECT max("hiredAt") AS "latest", count(DISTINCT "departmentUUID") AS "departments" FROM "employee" WHERE "deleted" = FALSE',
+            ],
+            'aggregate of a string expression' => [
+                static fn() => Plain::aggregate('sum("a") AS "total"'),
+                'SELECT sum("a") AS "total" FROM "plain"',
+            ],
             'count with conditions' => [
                 static fn() => Employee::count()->matching(['enabled' => true]),
                 'SELECT COUNT(*) AS "count" FROM "employee" WHERE "deleted" = FALSE AND "enabled" = TRUE',
@@ -327,7 +335,8 @@ final class RelentityTest extends TestCase
     {
         return [
             'fetch' => [static fn() => Plain::fetch(), ActionType::Fetch],
-            'count' => [static fn() => Plain::count(), ActionType::Count],
+            'aggregate' => [static fn() => Plain::aggregate('max("a") AS "a"'), ActionType::Aggregate],
+            'count' => [static fn() => Plain::count(), ActionType::Aggregate],
             'add' => [static fn() => Plain::add(['a' => 1]), ActionType::Add],
             'change' => [static fn() => Plain::change(['a' => 1]), ActionType::Change],
             'remove' => [static fn() => Plain::remove(), ActionType::Remove],
@@ -382,8 +391,6 @@ final class RelentityTest extends TestCase
             'sortedBy' => [static fn(RelentityInterface $entity) => $entity->sortedBy(['a' => 'asc']), ['count']],
             'limitedTo' => [static fn(RelentityInterface $entity) => $entity->limitedTo(1), ['count', 'remove']],
             'skipping' => [static fn(RelentityInterface $entity) => $entity->skipping(1), ['count', 'remove']],
-            'asRow' => [static fn(RelentityInterface $entity) => $entity->asRow(), ['count']],
-            'asTable' => [static fn(RelentityInterface $entity) => $entity->asTable(), ['count']],
         ];
         $cases = [];
         foreach ($methods as $method => [$call, $unsupported]) {
@@ -513,15 +520,37 @@ final class RelentityTest extends TestCase
         $this->assertSame('First', Note::fetch()->asValue(1));
     }
 
-    public function testCountAsValueIsAnInteger(): void
+    public function testCountAsValueReturnsTheValueOfTheAdapter(): void
     {
-        FixtureAdapter::reset([['count' => '7']]);
+        FixtureAdapter::reset([['count' => 7]]);
         $this->assertSame(7, Note::count()->asValue());
     }
 
-    public function testCountAsValueWithoutRowsIsZero(): void
+    public function testAggregateAsRowReturnsAllValues(): void
     {
-        $this->assertSame(0, Note::count()->asValue());
+        FixtureAdapter::reset([['total' => 12, 'latest' => '2026-11-20']]);
+        $this->assertSame(['total' => 12, 'latest' => '2026-11-20'], Note::aggregate(['sum("words") AS "total"', 'max("date") AS "latest"'])->asRow());
+    }
+
+    public function testCountIsAShorthandOfAggregate(): void
+    {
+        $this->assertSame(Employee::aggregate('COUNT(*) AS "count"')->asSQL(), Employee::count()->asSQL());
+    }
+
+    #[DataProvider('emptyAggregateProvider')]
+    public function testAggregateRequiresExpressions(string|array $expressions): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Missing expressions for aggregate action');
+        Plain::aggregate($expressions);
+    }
+
+    public static function emptyAggregateProvider(): array
+    {
+        return [
+            'an empty string' => [''],
+            'an empty array' => [[]],
+        ];
     }
 
     public function testExecuteRunsTheStatement(): void

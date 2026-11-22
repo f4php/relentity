@@ -35,7 +35,6 @@ abstract class AbstractRelation implements RelationInterface
     protected const string SUBQUERY_ALIAS = '___subquery___'; // unique enough to avoid conflict with actual table names
     public const string SOURCE_ALIAS = '___source___'; // unique enough to avoid conflict with actual table names
     protected const array SUPPORTED_ACTIONS = [
-        ActionType::Count,
         ActionType::Fetch,
     ];
 
@@ -44,16 +43,17 @@ abstract class AbstractRelation implements RelationInterface
     protected null|string|array|ConditionCollection $relationCondition;
     final protected function __construct(string|RelentityInterface $entity, null|string|array|ConditionCollection $condition = null)
     {
-        $this->target = match ($entity instanceof RelentityInterface) {
-            true => match (in_array($actionType = $entity->getActionType(), static::SUPPORTED_ACTIONS, strict: true)) {
-                    false => throw new InvalidArgumentException(static::class . " does not support {$actionType->name} action"),
-                    default => $entity,
-                },
+        $target = match ($entity instanceof RelentityInterface) {
+            true => $entity,
             default => match (is_subclass_of($entity, RelentityInterface::class)) {
-                    false => throw new InvalidArgumentException("Relation must be a " . RelentityInterface::class . ' class'),
-                    default => $entity::fetch()->without(...$entity::DEFAULT_RELATIONS), // prevent recursion
-                },
+                false => throw new InvalidArgumentException("Relation must be a " . RelentityInterface::class . ' class'),
+                default => $entity::fetch()->without(...$entity::DEFAULT_RELATIONS), // prevent recursion
+            },
         };
+        if (!in_array($actionType = $target->getActionType(), static::SUPPORTED_ACTIONS, strict: true)) {
+            throw new InvalidArgumentException(static::class . " does not support {$actionType->name} action");
+        }
+        $this->target = $target;
         $this->relationCondition = $condition;
     }
     public static function of(string|RelentityInterface $target, null|string|array|ConditionCollection $condition = null): static
@@ -63,7 +63,7 @@ abstract class AbstractRelation implements RelationInterface
     public function getConcealedPaths(string $alias): array
     {
         return match($this->target->getActionType() !== ActionType::Fetch) {
-            true => [], // count() targets return an integer
+            true => [], // aggregate() targets are not concealed
             default => array_map(
                 callback: static fn(string $column): string => ConcealmentPath::render([$alias, ...ConcealmentPath::fromString($column)->getSegments()]),
                 array: $this->target->getConcealedColumns(),
@@ -129,20 +129,23 @@ abstract class AbstractRelation implements RelationInterface
         string $sourceTableName,
         string $alias,
         Fragment $rows,
-        QueryBuilderInterface $targetQuery,
+        ?QueryBuilderInterface $targetQuery = null, // null when $rows contains the target itself
     ): QueryBuilderInterface {
+        $rowsQuery = DB::select($rows)
+            ->from([
+                static::SOURCE_ALIAS => DB::select(new Fragment('{#::#}.*', [
+                    DB::escapeIdentifier($sourceTableName),
+                ]))
+            ]);
+        if ($targetQuery !== null) {
+            $rowsQuery->crossJoinLateral(new Fragment('({#::#}) AS {#::#}', [
+                $targetQuery,
+                DB::escapeIdentifier(static::SUBQUERY_ALIAS),
+            ]));
+        }
         return $query
             ->leftJoinLateral(new Fragment('({#::#}) AS {#::#}', [
-                DB::select($rows)
-                    ->from([
-                        static::SOURCE_ALIAS => DB::select(new Fragment('{#::#}.*', [
-                            DB::escapeIdentifier($sourceTableName),
-                        ]))
-                    ])
-                    ->crossJoinLateral(new Fragment('({#::#}) AS {#::#}', [
-                        $targetQuery,
-                        DB::escapeIdentifier(static::SUBQUERY_ALIAS),
-                    ])),
+                $rowsQuery,
                 DB::escapeIdentifier($alias),
             ]))
             ->on('true');

@@ -40,6 +40,23 @@ class Many extends AbstractRelation implements RelationInterface {
     }
 
     public function appendJoinExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface {
+        $target = $this->buildTarget();
+        return static::buildJoinLateralQuery(
+            query: $query,
+            alias: $alias,
+            sourceTableName: $this->source->getTableName(),
+            rows: new Fragment('jsonb_agg(to_jsonb({#::#}.*)) AS {#::#}', [
+                DB::escapeIdentifier(self::SUBQUERY_ALIAS),
+                DB::escapeIdentifier(static::RELATION_ROWS_ALIAS),
+            ]),
+            targetQuery: $target->asQuery(),
+        );
+    }
+
+    /**
+     * A copy of the target, filtered by the relation condition, or by the conditions of via()
+     */
+    protected function buildTarget(): RelentityInterface {
         if(empty($this->source)) {
             throw new RuntimeException('Cannot determine source relentity, a withSource() call on relation instance is required');
         }
@@ -76,22 +93,6 @@ class Many extends AbstractRelation implements RelationInterface {
                 targetAlias: $target->getTableName(),
             ));
         }
-        return static::buildJoinLateralQuery(
-            query: $query,
-            alias: $alias,
-            sourceTableName: $this->source->getTableName(),
-            rows: match($target->getActionType() === ActionType::Count) { 
-                true => new Fragment('{#::#}.{#::#} AS {#::#}', [
-                    DB::escapeIdentifier(self::SUBQUERY_ALIAS),
-                    DB::escapeIdentifier(RelentityInterface::COUNT_ALIAS),
-                    DB::escapeIdentifier(static::RELATION_ROWS_ALIAS),
-                ]),
-                default => new Fragment('jsonb_agg(to_jsonb({#::#}.*)) AS {#::#}', [
-                    DB::escapeIdentifier(self::SUBQUERY_ALIAS),
-                    DB::escapeIdentifier(static::RELATION_ROWS_ALIAS),
-                ])
-            },
-            targetQuery: $target->asQuery(),
-        );
+        return $target;
     }
 }

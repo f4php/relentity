@@ -23,6 +23,7 @@ interface RelentityInterface {
     public const array DEFAULT_RELATIONS = [];
     final public const string COUNT_ALIAS = 'count';
     public static function add(array $values): static;
+    public static function aggregate(string|array|SelectExpressionCollection $expressions): static;
     public static function change(array $changes): static;
     public static function count(): static;
     public static function fetch(null|string|array|SelectExpressionCollection $columns = null): static;

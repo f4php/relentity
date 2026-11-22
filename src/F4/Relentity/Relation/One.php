@@ -21,6 +21,7 @@ use F4\Relentity\{
 class One extends AbstractRelation implements RelationInterface {
 
     protected const array SUPPORTED_ACTIONS = [
+        ActionType::Aggregate,
         ActionType::Fetch,
     ];
 
@@ -29,6 +30,21 @@ class One extends AbstractRelation implements RelationInterface {
             throw new RuntimeException('Cannot determine source relentity, a withSource() call on relation instance is required');
         }
         $target = clone ($this->target);
+        // an aggregate summarizes the rows that belong to the source, so it defaults to the condition of Many
+        $defaultColumn = match ($target->getActionType()) {
+            ActionType::Aggregate => $this->source->getPrimaryKey(),
+            default => $target->getPrimaryKey(),
+        };
+        $target->matching(static::buildJoinCondition(
+            condition: $this->relationCondition,
+            defaultSourceColumn: $defaultColumn,
+            defaultTargetColumn: $defaultColumn,
+            sourceAlias: static::SOURCE_ALIAS,
+            targetAlias: $target->getTableName(),
+        ));
+        if ($target->getActionType() === ActionType::Fetch) {
+            $target->limitedTo(1);
+        }
         return static::buildJoinLateralQuery(
             query: $query,
             alias: $alias,
@@ -37,16 +53,7 @@ class One extends AbstractRelation implements RelationInterface {
                 DB::escapeIdentifier(self::SUBQUERY_ALIAS),
                 DB::escapeIdentifier(static::RELATION_ROWS_ALIAS),
             ]),
-            targetQuery: $target
-                ->matching(static::buildJoinCondition(
-                    condition: $this->relationCondition,
-                    defaultSourceColumn: $target->getPrimaryKey(),
-                    defaultTargetColumn: $target->getPrimaryKey(),
-                    sourceAlias: static::SOURCE_ALIAS,
-                    targetAlias: $target->getTableName(),
-                ))
-                ->limitedTo(1)
-                ->asQuery(),
+            targetQuery: $target->asQuery(),
         );
     }
 }

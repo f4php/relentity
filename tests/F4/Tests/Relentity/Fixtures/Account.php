@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace F4\Tests\Relentity\Fixtures;
 
 use F4\Relentity\AbstractRelentity;
-use F4\Relentity\Relation\{Many, One, RelationInterface};
+use F4\Relentity\Relation\{Many, One, RelationInterface, Value};
 use F4\Tests\DB\FixtureAdapter;
 
 /**
@@ -25,7 +25,7 @@ class Account extends AbstractRelentity
             return Many::of(Account::fetch()->with('owner'), ['accountUUID' => 'ownerUUID']);
         },
         'memberCount' => static function (): RelationInterface {
-            return Many::of(Account::count(), ['accountUUID' => 'ownerUUID']);
+            return Value::of(Account::count(), ['accountUUID' => 'ownerUUID']);
         },
         'revealedOwner' => static function (): RelationInterface {
             return One::of(Account::fetch()->revealing('passwordHash'), ['ownerUUID' => 'accountUUID']);

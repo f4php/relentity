@@ -14,7 +14,7 @@ use PHPUnit\Framework\TestCase;
 use F4\DB;
 use F4\Relentity\RelentityInterface;
 use F4\Tests\DB\BacktickAdapter;
-use F4\Relentity\Relation\{Many, ManyToMany, One, RelationInterface};
+use F4\Relentity\Relation\{Many, ManyToMany, One, RelationInterface, Value};
 use F4\Tests\Relentity\Fixtures\{
     BareEmployee,
     CycleA,
@@ -50,9 +50,14 @@ final class RelationTest extends TestCase
     {
         return self::join('jsonb_agg(to_jsonb("___subquery___".*))', $alias, $sourceTable, $targetQuery);
     }
-    private static function counted(string $alias, string $sourceTable, string $targetQuery): string
+    private static function valued(string $alias, string $sourceTable, string $targetQuery): string
     {
-        return self::join('"___subquery___"."count"', $alias, $sourceTable, $targetQuery);
+        return sprintf(
+            'LEFT JOIN LATERAL (SELECT (%s) AS "___relation_rows___" FROM (SELECT "%s".*) AS "___source___") AS "%s" ON true',
+            $targetQuery,
+            $sourceTable,
+            $alias,
+        );
     }
     /**
      * A BareEmployee query with a single relation
@@ -95,9 +100,13 @@ final class RelationTest extends TestCase
                 'approvedTimesheets',
                 self::many('approvedTimesheets', 'employee', 'SELECT "timesheet".* FROM "timesheet" WHERE "approved" = TRUE AND ("___source___"."employeeUUID" = "timesheet"."employeeUUID") ORDER BY "date" DESC LIMIT 100'),
             ],
-            'Many of a count() target' => [
+            'One of an aggregate() target, with the condition of Many' => [
+                'timesheetTotals',
+                self::one('timesheetTotals', 'employee', 'SELECT sum("hours") AS "hours", max("date") AS "lastDate" FROM "timesheet" WHERE ("___source___"."employeeUUID" = "timesheet"."employeeUUID")'),
+            ],
+            'Value of a count() target' => [
                 'timesheetCount',
-                self::counted('timesheetCount', 'employee', 'SELECT COUNT(*) AS "count" FROM "timesheet" WHERE ("___source___"."employeeUUID" = "timesheet"."employeeUUID")'),
+                self::valued('timesheetCount', 'employee', 'SELECT COUNT(*) AS "count" FROM "timesheet" WHERE ("___source___"."employeeUUID" = "timesheet"."employeeUUID")'),
             ],
             'Many with a custom ConditionCollection, used as is' => [
                 'colleagues',
@@ -119,9 +128,9 @@ final class RelationTest extends TestCase
                 'linkedColleagues',
                 self::many('linkedColleagues', 'employee', sprintf(self::EMPLOYEE_TARGET, 'EXISTS(SELECT 1 FROM "employee_colleague" WHERE (("employee_colleague"."a" = "___source___"."employeeUUID") AND ("employee_colleague"."b" = "employee"."employeeUUID")))', 50)),
             ],
-            'via of a count() target' => [
+            'Value via a link table' => [
                 'projectCount',
-                self::counted('projectCount', 'employee', 'SELECT COUNT(*) AS "count" FROM "project" WHERE EXISTS(SELECT 1 FROM "employee_project" WHERE (("___source___"."employeeUUID" = "employee_project"."employeeUUID") AND ("employee_project"."projectUUID" = "project"."projectUUID")))'),
+                self::valued('projectCount', 'employee', 'SELECT COUNT(*) AS "count" FROM "project" WHERE EXISTS(SELECT 1 FROM "employee_project" WHERE (("___source___"."employeeUUID" = "employee_project"."employeeUUID") AND ("employee_project"."projectUUID" = "project"."projectUUID")))'),
             ],
             'nested relations of the target' => [
                 'projectsWithClients',
@@ -145,7 +154,7 @@ final class RelationTest extends TestCase
             sprintf(
                 'SELECT "employeeUUID", "name", "department"."___relation_rows___" AS "department", "timesheetCount"."___relation_rows___" AS "timesheetCount" FROM "employee" %s %s WHERE "deleted" = FALSE ORDER BY "name" ASC LIMIT 50',
                 self::one('department', 'employee', 'SELECT "department".* FROM "department" WHERE ("___source___"."departmentUUID" = "department"."departmentUUID") LIMIT 1'),
-                self::counted('timesheetCount', 'employee', 'SELECT COUNT(*) AS "count" FROM "timesheet" WHERE ("___source___"."employeeUUID" = "timesheet"."employeeUUID")'),
+                self::valued('timesheetCount', 'employee', 'SELECT COUNT(*) AS "count" FROM "timesheet" WHERE ("___source___"."employeeUUID" = "timesheet"."employeeUUID")'),
             ),
             Employee::fetch()->with('department', 'timesheetCount')->asSQL(),
         );
@@ -231,7 +240,7 @@ final class RelationTest extends TestCase
     public function testWithoutExcludesDefaultRelations(): void
     {
         $this->assertSame(
-            self::employeeWith('timesheetCount', self::counted('timesheetCount', 'employee', 'SELECT COUNT(*) AS "count" FROM "timesheet" WHERE ("___source___"."employeeUUID" = "timesheet"."employeeUUID")')),
+            self::employeeWith('timesheetCount', self::valued('timesheetCount', 'employee', 'SELECT COUNT(*) AS "count" FROM "timesheet" WHERE ("___source___"."employeeUUID" = "timesheet"."employeeUUID")')),
             DefaultRelationEmployee::fetch()->without('department')->asSQL(),
         );
         $this->assertSame('SELECT "employeeUUID" FROM "employee"', DefaultRelationEmployee::fetch()->without('department', 'timesheetCount')->asSQL());
@@ -374,10 +383,20 @@ final class RelationTest extends TestCase
     public static function invalidRelationProvider(): array
     {
         return [
-            'One of a count() target' => [
-                static fn() => One::of(Timesheet::count()),
+            'Many of a count() target' => [
+                static fn() => Many::of(Timesheet::count()),
                 InvalidArgumentException::class,
-                'F4\Relentity\Relation\One does not support Count action',
+                'F4\Relentity\Relation\Many does not support Aggregate action',
+            ],
+            'Value of a fetch() target' => [
+                static fn() => Value::of(Timesheet::fetch('hours')),
+                InvalidArgumentException::class,
+                'F4\Relentity\Relation\Value does not support Fetch action',
+            ],
+            'Value of a class, which is a fetch() target' => [
+                static fn() => Value::of(Timesheet::class),
+                InvalidArgumentException::class,
+                'F4\Relentity\Relation\Value does not support Fetch action',
             ],
             'Many of an add() target' => [
                 static fn() => Many::of(Plain::add(['a' => 1])),

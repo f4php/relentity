@@ -16,6 +16,7 @@ Relations are compiled into `LEFT JOIN LATERAL` subqueries that return related r
     - [Join conditions](#join-conditions)
     - [Link tables](#link-tables)
     - [Customizing the target](#customizing-the-target)
+    - [Aggregates](#aggregates)
     - [Choosing relations per query](#choosing-relations-per-query)
     - [Relations that depend on the source](#relations-that-depend-on-the-source)
     - [Relations of related rows](#relations-of-related-rows)
@@ -84,6 +85,7 @@ Every statement starts with a static method, is shaped by chained methods, and e
 Employees::fetch()->matching(['email' => $email])->asRow();     // ?array, the first row
 Employees::fetch()->matching(['enabled' => true])->asTable();   // array of rows
 Employees::count()->matching(['enabled' => true])->asValue();   // int
+Employees::aggregate(['min("hiredAt") AS "first"', 'max("hiredAt") AS "last"'])->asRow();   // ['first' => ..., 'last' => ...]
 
 Employees::add(['name' => 'Eve', 'email' => 'eve@example.com'])->asRow();        // the inserted row
 Employees::change(['enabled' => false])->matching(['employeeUUID' => $uuid])->execute();
@@ -154,7 +156,7 @@ Employees::fetch()->enabled()->asSQL();
 | Constant | Default | Applies to | Overridden by |
 |---|---|---|---|
 | `DEFAULT_SELECT` | all columns of the table | `fetch()` | `fetch($columns)`, `selecting()` |
-| `DEFAULT_WHERE` | none | `fetch()`, `count()`, `change()`, `remove()` | extended by `matching()` |
+| `DEFAULT_WHERE` | none | `fetch()`, `aggregate()`, `change()`, `remove()` | extended by `matching()` |
 | `DEFAULT_ORDER` | none | `fetch()` | `sortedBy()` replaces it, `sortedBy()` without arguments removes it |
 | `DEFAULT_LIMIT` | `100` | `fetch()` | `limitedTo()`, `unlimited()`; `null` means no limit |
 | `DEFAULT_RETURNING` | `'*'` | `add()`, `change()`, `remove()` | `asQuery(returning: ...)`; a `null` constant means no `RETURNING`, while `asQuery(returning: null)` keeps the constant |
@@ -176,7 +178,8 @@ Relations are declared in `RELATIONS`, keyed by an alias, which is also the name
 |---|---|---|
 | `One::of($target)` | the related row | `null` |
 | `Many::of($target)` | a list of related rows | `null`, not an empty list: iterate over `$row['timesheets'] ?? []` |
-| `Many::of(Target::count())` | the number of related rows, see [Customizing the target](#customizing-the-target) | `0` |
+| `One::of(Target::aggregate(...))` | a row of aggregate values, see [Aggregates](#aggregates) | a row of `null` values, `0` for `count()` |
+| `Value::of(Target::count())` | a single aggregate value, see [Aggregates](#aggregates) | `0` for `count()`, `null` for most other aggregates |
 
 `ManyToMany` is an alias of `Many`, for readability of relations [through a link table](#link-tables).
 
@@ -231,7 +234,7 @@ Each relation adds one column, named after its alias, to the selected columns. W
 
 The entity that declares a relation is its **source**, the related entity is its **target**. The closure is called with the source statement whenever the relation is used, so a relation is built anew for every query, and can [depend on the source](#relations-that-depend-on-the-source). PHP does not allow arrow functions (`fn`) in constants, so use `static function` or a [first-class callable](#customizing-the-target).
 
-The `DEFAULT_LIMIT` of the target, `100` unless redefined, limits **each** list of related rows. An employee with 150 timesheets therefore gets up to 100 of them, while a [`count()` relation](#customizing-the-target) of the same timesheets returns 150. Which 100 depends on the ordering of the target, its `DEFAULT_ORDER` or `sortedBy()`; without one, PostgreSQL picks any. Lift or change the limit on the target, and sort it when the subset matters:
+The `DEFAULT_LIMIT` of the target, `100` unless redefined, limits **each** list of related rows. An employee with 150 timesheets therefore gets up to 100 of them, while a [`count()` relation](#aggregates) of the same timesheets returns 150. Which 100 depends on the ordering of the target, its `DEFAULT_ORDER` or `sortedBy()`; without one, PostgreSQL picks any. Lift or change the limit on the target, and sort it when the subset matters:
 
 ```php
 'timesheets' => static function (): RelationInterface {
@@ -273,6 +276,7 @@ Without a condition, a relation follows the naming convention of the primary key
 |---|---|---|
 | `One::of(Target::class)` | `source.<target key> = target.<target key>` | the source "belongs to" the target |
 | `Many::of(Target::class)` | `source.<source key> = target.<source key>` | the source "has many" targets |
+| `One::of(Target::aggregate(...))`, `Value::of(...)` | `source.<source key> = target.<source key>` | a summary of the targets of the source |
 
 The second argument of `of()` changes the columns:
 
@@ -368,7 +372,7 @@ A link table is used in an `EXISTS` condition, not joined, so duplicate links ne
 
 ### Customizing the target
 
-`of()` accepts an entity class, or a statement started with `fetch()` or `count()`, which can be shaped by the same methods as any other query:
+`of()` accepts an entity class, or a statement started with `fetch()`, which can be shaped by the same methods as any other query:
 
 ```php
 class Timesheets extends AbstractRelentity
@@ -390,14 +394,6 @@ class Employees extends AbstractRelentity
         // filtered, sorted by DEFAULT_ORDER of Timesheets, and limited
         'recentTimesheets' => static function (): RelationInterface {
             return Many::of(Timesheets::approved()->limitedTo(5));
-        },
-        // an integer instead of the rows
-        'timesheetCount' => static function (): RelationInterface {
-            return Many::of(Timesheets::count());
-        },
-        // counts work through link tables, too
-        'projectCount' => static function (): RelationInterface {
-            return Many::of(Projects::count())->via('employee_project');
         },
     ];
 }
@@ -424,7 +420,45 @@ class Employees extends AbstractRelentity
 }
 ```
 
-`One` supports `fetch()` targets only, and returns the first row according to the ordering of the target. A target can have relations of its own, see [Relations of related rows](#relations-of-related-rows).
+`One` returns the first row according to the ordering of the target. A target can have relations of its own, see [Relations of related rows](#relations-of-related-rows).
+
+### Aggregates
+
+`aggregate()` starts a statement of aggregate expressions, in the same forms as `fetch()` accepts columns. Only `DEFAULT_WHERE` and `matching()` apply to it: there is no ordering, no limit, no concealment and no relations. `count()` is a shorthand for `aggregate('COUNT(*) AS "count"')`.
+
+```php
+Timesheets::aggregate(['sum("hours") AS "hours"', 'max("date") AS "lastDate"'])->matching(['approved' => true])->asRow();
+// ['hours' => '412.5', 'lastDate' => '2026-11-20']
+```
+
+As the target of a relation, an aggregate summarizes the rows that belong to the source, so by default it uses the condition of `Many`, `source.<source key> = target.<source key>`. `One` returns all of its values as a row, and `Value` returns the single value of a target with exactly one column:
+
+```php
+use F4\Relentity\Relation\{One, RelationInterface, Value};
+
+class Employees extends AbstractRelentity
+{
+    // ...
+    public const array RELATIONS = [
+        // ['hours' => 412.5, 'lastDate' => '2026-11-20']
+        'timesheetTotals' => static function (): RelationInterface {
+            return One::of(Timesheets::aggregate(['sum("hours") AS "hours"', 'max("date") AS "lastDate"']));
+        },
+        // 61
+        'timesheetCount' => static function (): RelationInterface {
+            return Value::of(Timesheets::count());
+        },
+        // Value supports via(), like Many
+        'projectCount' => static function (): RelationInterface {
+            return Value::of(Projects::count())->via('employee_project');
+        },
+    ];
+}
+```
+
+An aggregate without matching rows still returns a row: `count()` is `0`, while `sum()`, `max()` and most other aggregates are `null`, so use e.g. `COALESCE(sum("hours"), 0)` when a number is expected.
+
+`Value` places the target in a scalar subquery, so PostgreSQL throws for a target with more than one column (`subquery must return only one column`). The value keeps its column type, so a `numeric` sum is an exact string, as when fetched directly. `One` returns its row through JSON, with the types of [related rows](#values-of-related-rows). `Value` supports `aggregate()` targets only, and `Many` supports `fetch()` targets only. `One` has no `via()`, so a row of aggregates through a link table is not available yet.
 
 ### Choosing relations per query
 
@@ -648,7 +682,7 @@ Employees::fetch()->concealing('email')->asTable();         // without passwordH
 
 Each of the following overrides the ones before it, whatever the order of the calls: `DEFAULT_CONCEALING`, `revealing()`, `concealing()`. So `revealing()` undoes a default, and `concealing()` always wins.
 
-Concealment applies to the rows returned by `fetch()`, and to the rows returned by `add()`, `change()` and `remove()` through `RETURNING`. It does not apply to `count()`, which returns a number.
+Concealment applies to the rows returned by `fetch()`, and to the rows returned by `add()`, `change()` and `remove()` through `RETURNING`. It does not apply to `aggregate()` and `count()`.
 
 ### Concealing related rows
 
@@ -670,7 +704,7 @@ Employees::fetch()
 
 A path into a list of related rows, such as `$.reports.email`, applies to each of them. Relations declared with a customized target follow that target, so `Many::of(Employees::fetch()->revealing('passwordHash'))` returns related rows with `passwordHash`.
 
-`getConcealedColumns()` returns the resolved configuration, relation paths included. It returns it for any statement, `count()` included, although only executed `fetch()` and write statements have rows to conceal:
+`getConcealedColumns()` returns the resolved configuration, relation paths included. It returns it for any statement, `aggregate()` included, although only executed `fetch()` and write statements have rows to conceal:
 
 ```php
 Employees::fetch()->with('manager', 'reports')->getConcealedColumns();
@@ -749,7 +783,8 @@ Relations refer to tables by their names, so a few combinations of names produce
 | Method | Statement |
 |---|---|
 | `fetch($columns = null)` | `SELECT`; `$columns` replace `DEFAULT_SELECT` |
-| `count()` | `SELECT COUNT(*)` |
+| `aggregate($expressions)` | `SELECT` of aggregate expressions, see [Aggregates](#aggregates) |
+| `count()` | `SELECT COUNT(*) AS "count"`, a shorthand for `aggregate()` |
 | `add(array $values)` | `INSERT` |
 | `change(array $changes)` | `UPDATE` |
 | `remove()` | `DELETE` |
@@ -769,10 +804,10 @@ All of them mutate and return the entity. Remember to create cloned copies of Re
 | `with(...$relations)` | `fetch()` | includes relations by alias, or `['alias' => callable]` |
 | `without(...$relations)` | `fetch()` | excludes relations by alias, default ones included |
 | `joinedWith($table, $condition = null, $method = 'join')` | `fetch()` | joins a table or a subquery, see [Joining tables](#joining-tables) |
-| `concealing(...$columns)` | all except `count()` | conceals result keys or paths, `$.alias.column` for related rows |
-| `revealing(...$columns)` | all except `count()` | reveals keys or paths concealed by default |
+| `concealing(...$columns)` | all except `aggregate()` | conceals result keys or paths, `$.alias.column` for related rows |
+| `revealing(...$columns)` | all except `aggregate()` | reveals keys or paths concealed by default |
 
-`selecting()`, `with()`, `without()` and `joinedWith()` throw an `InvalidArgumentException` for any other statement, and so do `sortedBy()`, `limitedTo()` and `skipping()` for `count()`, and `limitedTo()` and `skipping()` for `remove()`.
+`selecting()`, `with()`, `without()` and `joinedWith()` throw an `InvalidArgumentException` for any other statement, and so do `sortedBy()`, `limitedTo()` and `skipping()` for `aggregate()`, and `limitedTo()` and `skipping()` for `remove()`.
 
 The other combinations are accepted, but have no effect: `change()` ignores `sortedBy()`, `limitedTo()` and `skipping()`, `remove()` ignores `sortedBy()`, `add()` ignores `matching()`, `sortedBy()`, `limitedTo()` and `skipping()`, and `unlimited()` has no effect on any statement other than `fetch()`. See the [warning about `change()`](#quick-start).
 
@@ -784,9 +819,9 @@ Methods of the query builder returned by `asQuery()` that resemble these behave 
 
 | Method | Returns | Description |
 |---|---|---|
-| `asTable()` | `array` | executes the statement and returns all rows; not available for `count()` |
-| `asRow()` | `?array` | executes the statement and returns the first row; not available for `count()` |
-| `asValue(string\|int $column = 0)` | `mixed` | executes the statement and returns one value of the first row; an `int` for `count()` |
+| `asTable()` | `array` | executes the statement and returns all rows |
+| `asRow()` | `?array` | executes the statement and returns the first row |
+| `asValue(string\|int $column = 0)` | `mixed` | executes the statement and returns one value of the first row |
 | `execute()` | `void` | executes the statement and discards the result |
 | `asQuery($columns = null, ?string $returning = null)` | `QueryBuilderInterface` | builds the statement without executing it; `$columns` replace the selected columns of `fetch()`, `$returning` replaces `DEFAULT_RETURNING` of `add()`, `change()` and `remove()`, and `null` keeps either |
 | `asSQL()` | `string` | builds the statement and returns its SQL |
@@ -796,10 +831,11 @@ Methods of the query builder returned by `asQuery()` that resemble these behave 
 
 | Method | Description |
 |---|---|
-| `One::of($target, $condition = null)` | a single related row; `$target` is a class or a `fetch()` statement |
-| `Many::of($target, $condition = null)` | a list of related rows, or their number for a `count()` target |
+| `One::of($target, $condition = null)` | a single related row; `$target` is a class, a `fetch()` or an `aggregate()` statement |
+| `Many::of($target, $condition = null)` | a list of related rows; `$target` is a class or a `fetch()` statement |
 | `ManyToMany::of($target, $condition = null)` | same as `Many` |
-| `->via($table, $sourceCondition = null, $targetCondition = null)` | `Many` and `ManyToMany` only: relates through a link table name, or a `fetch()` statement of a link entity |
+| `Value::of($target, $condition = null)` | a single value; `$target` is an `aggregate()` statement with one column, e.g. `count()` |
+| `->via($table, $sourceCondition = null, $targetCondition = null)` | `Many`, `ManyToMany` and `Value` only: relates through a link table name, or a `fetch()` statement of a link entity |
 
 A condition is one of:
 

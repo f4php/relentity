@@ -7,7 +7,7 @@ namespace F4\Tests\Relentity\Fixtures;
 use F4\DB;
 use F4\DB\{ConditionCollection, Fragment};
 use F4\Relentity\AbstractRelentity;
-use F4\Relentity\Relation\{Many, ManyToMany, One, RelationInterface};
+use F4\Relentity\Relation\{Many, ManyToMany, One, RelationInterface, Value};
 
 /**
  * An entity with defaults and relations of every kind, as in the README
@@ -42,14 +42,17 @@ class Employee extends AbstractRelentity
             return Many::of(Timesheet::approved()->limitedTo(5));
         },
         'timesheetCount' => static function (): RelationInterface {
-            return Many::of(Timesheet::count());
+            return Value::of(Timesheet::count());
+        },
+        'timesheetTotals' => static function (): RelationInterface {
+            return One::of(Timesheet::aggregate(['sum("hours") AS "hours"', 'max("date") AS "lastDate"']));
         },
         'approvedTimesheets' => Timesheet::ofEmployee(...),
         'projects' => static function (): RelationInterface {
             return ManyToMany::of(Project::class)->via('employee_project');
         },
         'projectCount' => static function (): RelationInterface {
-            return Many::of(Project::count())->via('employee_project');
+            return Value::of(Project::count())->via('employee_project');
         },
         'projectsWithClients' => static function (): RelationInterface {
             return ManyToMany::of(Project::fetch()->with('client'))->via('employee_project');
