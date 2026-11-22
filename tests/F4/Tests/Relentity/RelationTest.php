@@ -50,6 +50,10 @@ final class RelationTest extends TestCase
     {
         return self::join('jsonb_agg(to_jsonb("___subquery___".*))', $alias, $sourceTable, $targetQuery);
     }
+    private static function aggregated(string $alias, string $sourceTable, string $targetQuery): string
+    {
+        return self::valued($alias, $sourceTable, sprintf('SELECT to_jsonb("___subquery___".*) FROM (%s) AS "___subquery___"', $targetQuery));
+    }
     private static function valued(string $alias, string $sourceTable, string $targetQuery): string
     {
         return sprintf(
@@ -102,7 +106,7 @@ final class RelationTest extends TestCase
             ],
             'One of an aggregate() target, with the condition of Many' => [
                 'timesheetTotals',
-                self::one('timesheetTotals', 'employee', 'SELECT sum("hours") AS "hours", max("date") AS "lastDate" FROM "timesheet" WHERE ("___source___"."employeeUUID" = "timesheet"."employeeUUID")'),
+                self::aggregated('timesheetTotals', 'employee', 'SELECT sum("hours") AS "hours", max("date") AS "lastDate" FROM "timesheet" WHERE ("___source___"."employeeUUID" = "timesheet"."employeeUUID")'),
             ],
             'Value of a count() target' => [
                 'timesheetCount',
@@ -127,6 +131,14 @@ final class RelationTest extends TestCase
             'via with custom ConditionCollections' => [
                 'linkedColleagues',
                 self::many('linkedColleagues', 'employee', sprintf(self::EMPLOYEE_TARGET, 'EXISTS(SELECT 1 FROM "employee_colleague" WHERE (("employee_colleague"."a" = "___source___"."employeeUUID") AND ("employee_colleague"."b" = "employee"."employeeUUID")))', 50)),
+            ],
+            'One via a link table, limited to the first row' => [
+                'latestProject',
+                self::one('latestProject', 'employee', 'SELECT "project".* FROM "project" WHERE EXISTS(SELECT 1 FROM "employee_project" WHERE (("___source___"."employeeUUID" = "employee_project"."employeeUUID") AND ("employee_project"."projectUUID" = "project"."projectUUID"))) ORDER BY "startedAt" DESC LIMIT 1'),
+            ],
+            'One of an aggregate() target via a link table' => [
+                'projectTotals',
+                self::aggregated('projectTotals', 'employee', 'SELECT sum("budget") AS "budget", max("startedAt") AS "lastStartedAt" FROM "project" WHERE EXISTS(SELECT 1 FROM "employee_project" WHERE (("___source___"."employeeUUID" = "employee_project"."employeeUUID") AND ("employee_project"."projectUUID" = "project"."projectUUID")))'),
             ],
             'Value via a link table' => [
                 'projectCount',

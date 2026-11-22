@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace F4\Relentity\Relation;
 
-use InvalidArgumentException;
+use InvalidArgumentException,
+    RuntimeException;
 
 use F4\DB;
 use F4\DB\{
@@ -41,6 +42,9 @@ abstract class AbstractRelation implements RelationInterface
     protected RelentityInterface $source;
     protected RelentityInterface $target;
     protected null|string|array|ConditionCollection $relationCondition;
+    protected string|RelentityInterface $viaEntity;
+    protected null|string|array|ConditionCollection $viaSourceCondition;
+    protected null|string|array|ConditionCollection $viaTargetCondition;
     final protected function __construct(string|RelentityInterface $entity, null|string|array|ConditionCollection $condition = null)
     {
         $target = match ($entity instanceof RelentityInterface) {
@@ -70,10 +74,75 @@ abstract class AbstractRelation implements RelationInterface
             ),
         };
     }
+    /**
+     * Relates the source to the target through a link table. Replaces the condition passed to of().
+     * @param string|RelentityInterface $table a link table name, or a fetch() statement of a link entity
+     */
+    public function via(string|RelentityInterface $table, null|string|array|ConditionCollection $sourceCondition = null, null|string|array|ConditionCollection $targetCondition = null): static
+    {
+        if ($table instanceof RelentityInterface && $table->getActionType() !== ActionType::Fetch) {
+            throw new InvalidArgumentException(__FUNCTION__ . '() requires Relentity objects to have Fetch action type');
+        }
+        $this->viaEntity = $table;
+        $this->viaSourceCondition = $sourceCondition;
+        $this->viaTargetCondition = $targetCondition;
+        return $this;
+    }
     public function withSource(RelentityInterface $relentity): static
     {
         $this->source = $relentity;
         return $this;
+    }
+    /**
+     * The column compared on both sides when of() has no condition: by default the primary key
+     * of the source, i.e. the target rows belong to the source
+     */
+    protected function getDefaultConditionColumn(RelentityInterface $target): string
+    {
+        return $this->source->getPrimaryKey();
+    }
+    /**
+     * A copy of the target, filtered by the relation condition, or by the conditions of via()
+     */
+    final protected function buildTarget(): RelentityInterface
+    {
+        if (empty($this->source)) {
+            throw new RuntimeException('Cannot determine source relentity, a withSource() call on relation instance is required');
+        }
+        $target = clone ($this->target);
+        if (!empty($this->viaEntity)) {
+            $viaTable = $this->viaEntity instanceof RelentityInterface ? $this->viaEntity->getTableName() : $this->viaEntity;
+            $linkCondition = ConditionCollection::of(
+                static::buildJoinCondition(                        // source.col = link.col
+                    condition: $this->viaSourceCondition,
+                    defaultSourceColumn: $this->source->getPrimaryKey(),
+                    defaultTargetColumn: $this->source->getPrimaryKey(),
+                    sourceAlias: static::SOURCE_ALIAS,
+                    targetAlias: $viaTable,
+                ),
+                static::buildJoinCondition(                        // link.col = target.col
+                    condition: $this->viaTargetCondition,
+                    defaultSourceColumn: $target->getPrimaryKey(),
+                    defaultTargetColumn: $target->getPrimaryKey(),
+                    sourceAlias: $viaTable,
+                    targetAlias: $target->getTableName(),
+                ),
+            );
+            $target->matching(['EXISTS({#::#})' => match ($this->viaEntity instanceof RelentityInterface) {
+                true => (clone $this->viaEntity)->unlimited()->matching($linkCondition)->asQuery('1'),
+                default => DB::select(1)->from($this->viaEntity)->where($linkCondition),
+            }]);
+        } else {
+            $defaultColumn = $this->getDefaultConditionColumn($target);
+            $target->matching(static::buildJoinCondition(
+                condition: $this->relationCondition,
+                defaultSourceColumn: $defaultColumn,
+                defaultTargetColumn: $defaultColumn,
+                sourceAlias: static::SOURCE_ALIAS,
+                targetAlias: $target->getTableName(),
+            ));
+        }
+        return $target;
     }
     abstract public function appendJoinExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface;
     public function appendSelectExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface

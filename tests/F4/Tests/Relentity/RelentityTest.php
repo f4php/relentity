@@ -389,6 +389,8 @@ final class RelentityTest extends TestCase
             'without' => [static fn(RelentityInterface $entity) => $entity->without('a'), ['count', 'add', 'change', 'remove']],
             'joinedWith' => [static fn(RelentityInterface $entity) => $entity->joinedWith('a', 'id'), ['count', 'add', 'change', 'remove']],
             'sortedBy' => [static fn(RelentityInterface $entity) => $entity->sortedBy(['a' => 'asc']), ['count']],
+            'concealing' => [static fn(RelentityInterface $entity) => $entity->concealing('a'), ['count']],
+            'revealing' => [static fn(RelentityInterface $entity) => $entity->revealing('a'), ['count']],
             'limitedTo' => [static fn(RelentityInterface $entity) => $entity->limitedTo(1), ['count', 'remove']],
             'skipping' => [static fn(RelentityInterface $entity) => $entity->skipping(1), ['count', 'remove']],
         ];

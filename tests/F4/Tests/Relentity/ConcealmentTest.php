@@ -303,6 +303,12 @@ final class ConcealmentTest extends TestCase
         $this->assertSame(3, Account::count()->asValue());
     }
 
+    public function testAggregateHasNoConcealedColumns(): void
+    {
+        $this->assertSame([], Account::count()->getConcealedColumns());
+        $this->assertSame([], Account::aggregate('max("passwordHash") AS "latest"')->getConcealedColumns());
+    }
+
     public function testStrictModeRejectsAMissingConcealedKey(): void
     {
         FixtureAdapter::reset([['accountUUID' => 'a1', 'settings' => ['token' => 't']]]);

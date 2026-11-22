@@ -145,7 +145,11 @@ abstract class AbstractRelentity implements RelentityInterface
     }
     public function getConcealedColumns(): array
     {
-        return $this->resolveConcealedColumns($this->actionType === ActionType::Fetch ? $this->buildRelations() : []);
+        return match ($this->actionType) {
+            ActionType::Aggregate => [], // aggregate values are not concealed
+            ActionType::Fetch => $this->resolveConcealedColumns($this->buildRelations()),
+            default => $this->resolveConcealedColumns([]),
+        };
     }
     final protected function resolveConcealedColumns(array $relations): array
     {
@@ -320,6 +324,9 @@ abstract class AbstractRelentity implements RelentityInterface
     }
     public function concealing(string|array ...$columns): static
     {
+        if ($this->actionType === ActionType::Aggregate) {
+            throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
+        }
         array_is_list($columns) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
         $this->concealing = array_reduce(
             array: $columns,
@@ -330,6 +337,9 @@ abstract class AbstractRelentity implements RelentityInterface
     }
     public function revealing(string|array ...$columns): static
     {
+        if ($this->actionType === ActionType::Aggregate) {
+            throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
+        }
         array_is_list($columns) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
         $this->revealing = array_reduce(
             array: $columns,

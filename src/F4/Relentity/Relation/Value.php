@@ -12,7 +12,7 @@ use F4\DB\{
 
 use F4\Relentity\{
     ActionType,
-    Relation\Many,
+    Relation\AbstractRelation,
     Relation\RelationInterface,
 };
 
@@ -21,7 +21,7 @@ use F4\Relentity\{
  * Conditions and via() work as for Many. The target is a scalar subquery, so PostgreSQL rejects
  * a target with more than one column or more than one row.
  */
-class Value extends Many implements RelationInterface {
+class Value extends AbstractRelation implements RelationInterface {
 
     protected const array SUPPORTED_ACTIONS = [
         ActionType::Aggregate,

@@ -54,6 +54,12 @@ class Employee extends AbstractRelentity
         'projectCount' => static function (): RelationInterface {
             return Value::of(Project::count())->via('employee_project');
         },
+        'latestProject' => static function (): RelationInterface {
+            return One::of(Project::fetch()->sortedBy(['startedAt' => 'desc']))->via('employee_project');
+        },
+        'projectTotals' => static function (): RelationInterface {
+            return One::of(Project::aggregate(['sum("budget") AS "budget"', 'max("startedAt") AS "lastStartedAt"']))->via('employee_project');
+        },
         'projectsWithClients' => static function (): RelationInterface {
             return ManyToMany::of(Project::fetch()->with('client'))->via('employee_project');
         },
