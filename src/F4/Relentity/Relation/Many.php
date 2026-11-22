@@ -11,11 +11,17 @@ use F4\DB\{
 };
 
 use F4\Relentity\{
+    ActionType,
     Relation\AbstractRelation,
     Relation\RelationInterface,
 };
 
 class Many extends AbstractRelation implements RelationInterface {
+
+    protected const array SUPPORTED_ACTIONS = [
+        ActionType::Aggregate, // a list of group rows, or of the single row of an ungrouped aggregate
+        ActionType::Fetch,
+    ];
 
     public function appendJoinExpression(QueryBuilderInterface $query, string $alias): QueryBuilderInterface {
         $target = $this->buildTarget();

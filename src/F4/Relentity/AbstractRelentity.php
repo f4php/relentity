@@ -54,6 +54,7 @@ abstract class AbstractRelentity implements RelentityInterface
     private array $concealing = [];
     private array $revealing = [];
     private array $order = [];
+    private array $groups = [];
     private ?string $returning = null;
     private ?int $limit = null;
     private int $offset = 0;
@@ -86,8 +87,9 @@ abstract class AbstractRelentity implements RelentityInterface
                 break;
         }
         $this->where = static::DEFAULT_WHERE;
-        $this->order = static::DEFAULT_ORDER;
-        $this->limit = static::DEFAULT_LIMIT;
+        // the ordering and the limit of rows do not apply to aggregates
+        $this->order = $this->actionType === ActionType::Aggregate ? [] : static::DEFAULT_ORDER;
+        $this->limit = $this->actionType === ActionType::Aggregate ? null : static::DEFAULT_LIMIT;
         $this->returning = static::DEFAULT_RETURNING;
         $this->relations = array_reduce(
             array: static::DEFAULT_RELATIONS,
@@ -289,13 +291,17 @@ abstract class AbstractRelentity implements RelentityInterface
         if ($this->actionType !== ActionType::Add && $this->where) {
             $query->where($this->where);
         }
-        if ($this->actionType === ActionType::Fetch && $this->order) {
+        if ($this->actionType === ActionType::Aggregate && $this->groups) {
+            $query->groupBy(...$this->groups);
+        }
+        $paginated = in_array($this->actionType, [ActionType::Aggregate, ActionType::Fetch], strict: true);
+        if ($paginated && $this->order) {
             $query->order($this->order);
         }
-        if ($this->actionType === ActionType::Fetch && $this->limit !== null) {
+        if ($paginated && $this->limit !== null) {
             $query->limit($this->limit);
         }
-        if ($this->actionType === ActionType::Fetch && $this->offset) {
+        if ($paginated && $this->offset) {
             $query->offset($this->offset);
         }
         if (in_array($this->actionType, [ActionType::Add, ActionType::Change, ActionType::Remove], strict: true) && ($returning ?? $this->returning)) {
@@ -376,9 +382,10 @@ abstract class AbstractRelentity implements RelentityInterface
     }
     public function limitedTo(?int $rows, ?int $skipping = null): static
     {
-        if (in_array($this->actionType, [ActionType::Aggregate, ActionType::Remove], strict: true)) {
+        if ($this->actionType === ActionType::Remove) {
             throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
         }
+        $this->requireGroupsOfAggregate(__FUNCTION__);
         $this->limit = $rows;
         if ($skipping !== null) {
             $this->offset = $skipping;
@@ -387,11 +394,34 @@ abstract class AbstractRelentity implements RelentityInterface
     }
     public function skipping(int $rows): static
     {
-        if (in_array($this->actionType, [ActionType::Aggregate, ActionType::Remove], strict: true)) {
+        if ($this->actionType === ActionType::Remove) {
             throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
         }
+        $this->requireGroupsOfAggregate(__FUNCTION__);
         $this->offset = $rows;
         return $this;
+    }
+    /**
+     * Groups the rows of an aggregate() by columns, which replace those of earlier calls.
+     * Allows sortedBy(), limitedTo() and skipping() on the groups.
+     */
+    public function groupedBy(string ...$columns): static
+    {
+        if ($this->actionType !== ActionType::Aggregate) {
+            throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
+        }
+        array_is_list($columns) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
+        if ($columns === [] || in_array('', $columns, strict: true)) {
+            throw new InvalidArgumentException(__FUNCTION__ . '() requires non-empty column names');
+        }
+        $this->groups = $columns;
+        return $this;
+    }
+    private function requireGroupsOfAggregate(string $method): void
+    {
+        if ($this->actionType === ActionType::Aggregate && $this->groups === []) {
+            throw new InvalidArgumentException("{$method}() is not supported for intended action, an aggregate requires groupedBy() first");
+        }
     }
     public function execute(): void
     {
@@ -405,9 +435,7 @@ abstract class AbstractRelentity implements RelentityInterface
     }
     public function sortedBy(array|OrderCollection ...$criteria): static
     {
-        if (in_array($this->actionType, [ActionType::Aggregate], strict: true)) {
-            throw new InvalidArgumentException(__FUNCTION__ . '() is not supported for intended action');
-        }
+        $this->requireGroupsOfAggregate(__FUNCTION__);
         array_is_list($criteria) or throw new InvalidArgumentException(__FUNCTION__ . '() does not accept named arguments');
         $this->order = $criteria;
         return $this;

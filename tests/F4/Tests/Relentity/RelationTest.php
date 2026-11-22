@@ -140,6 +140,14 @@ final class RelationTest extends TestCase
                 'projectTotals',
                 self::aggregated('projectTotals', 'employee', 'SELECT sum("budget") AS "budget", max("startedAt") AS "lastStartedAt" FROM "project" WHERE EXISTS(SELECT 1 FROM "employee_project" WHERE (("___source___"."employeeUUID" = "employee_project"."employeeUUID") AND ("employee_project"."projectUUID" = "project"."projectUUID")))'),
             ],
+            'Many of a grouped aggregate() target' => [
+                'hoursPerProject',
+                self::many('hoursPerProject', 'employee', 'SELECT "projectUUID", sum("hours") AS "hours" FROM "timesheet" WHERE ("___source___"."employeeUUID" = "timesheet"."employeeUUID") GROUP BY ("projectUUID") ORDER BY "hours" DESC'),
+            ],
+            'One of a grouped aggregate() target limited to one group' => [
+                'topProject',
+                self::aggregated('topProject', 'employee', 'SELECT "projectUUID", sum("hours") AS "hours" FROM "timesheet" WHERE ("___source___"."employeeUUID" = "timesheet"."employeeUUID") GROUP BY ("projectUUID") ORDER BY "hours" DESC LIMIT 1'),
+            ],
             'Value via a link table' => [
                 'projectCount',
                 self::valued('projectCount', 'employee', 'SELECT COUNT(*) AS "count" FROM "project" WHERE EXISTS(SELECT 1 FROM "employee_project" WHERE (("___source___"."employeeUUID" = "employee_project"."employeeUUID") AND ("employee_project"."projectUUID" = "project"."projectUUID")))'),
@@ -392,14 +400,17 @@ final class RelationTest extends TestCase
         );
     }
 
+    public function testManyOfAnUngroupedAggregateIsAListOfItsSingleRow(): void
+    {
+        $this->assertSame(
+            self::employeeWith('x', self::many('x', 'employee', 'SELECT COUNT(*) AS "count" FROM "timesheet" WHERE ("___source___"."employeeUUID" = "timesheet"."employeeUUID")')),
+            BareEmployee::fetch()->with(['x' => fn() => Many::of(Timesheet::count())])->asSQL(),
+        );
+    }
+
     public static function invalidRelationProvider(): array
     {
         return [
-            'Many of a count() target' => [
-                static fn() => Many::of(Timesheet::count()),
-                InvalidArgumentException::class,
-                'F4\Relentity\Relation\Many does not support Aggregate action',
-            ],
             'Value of a fetch() target' => [
                 static fn() => Value::of(Timesheet::fetch('hours')),
                 InvalidArgumentException::class,

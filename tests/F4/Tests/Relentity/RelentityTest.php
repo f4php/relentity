@@ -72,6 +72,21 @@ final class RelentityTest extends TestCase
                 static fn() => Plain::aggregate('sum("a") AS "total"'),
                 'SELECT sum("a") AS "total" FROM "plain"',
             ],
+            'grouped aggregate' => [
+                static fn() => Employee::aggregate(['"departmentUUID"', 'count(*) AS "employees"'])->groupedBy('departmentUUID'),
+                'SELECT "departmentUUID", count(*) AS "employees" FROM "employee" WHERE "deleted" = FALSE GROUP BY ("departmentUUID")',
+            ],
+            'grouped aggregate by several columns, sorted and paginated' => [
+                static fn() => Employee::aggregate(['"departmentUUID"', '"enabled"', 'count(*) AS "employees"'])
+                    ->groupedBy('departmentUUID', 'enabled')
+                    ->sortedBy(['employees' => 'desc'])
+                    ->limitedTo(10, 20),
+                'SELECT "departmentUUID", "enabled", count(*) AS "employees" FROM "employee" WHERE "deleted" = FALSE GROUP BY ("departmentUUID", "enabled") ORDER BY "employees" DESC LIMIT 10 OFFSET 20',
+            ],
+            'groupedBy replaces earlier groups' => [
+                static fn() => Plain::aggregate(['"a"', 'count(*) AS "n"'])->groupedBy('b')->groupedBy('a'),
+                'SELECT "a", count(*) AS "n" FROM "plain" GROUP BY ("a")',
+            ],
             'count with conditions' => [
                 static fn() => Employee::count()->matching(['enabled' => true]),
                 'SELECT COUNT(*) AS "count" FROM "employee" WHERE "deleted" = FALSE AND "enabled" = TRUE',
@@ -378,19 +393,22 @@ final class RelentityTest extends TestCase
     public static function unsupportedActionProvider(): array
     {
         $statements = [
+            'fetch' => static fn() => Plain::fetch(),
             'count' => static fn() => Plain::count(),
+            'grouped count' => static fn() => Plain::count()->groupedBy('a'),
             'add' => static fn() => Plain::add(['a' => 1]),
             'change' => static fn() => Plain::change(['a' => 1]),
             'remove' => static fn() => Plain::remove(),
         ];
         $methods = [
-            'selecting' => [static fn(RelentityInterface $entity) => $entity->selecting('a'), ['count', 'add', 'change', 'remove']],
-            'with' => [static fn(RelentityInterface $entity) => $entity->with('a'), ['count', 'add', 'change', 'remove']],
-            'without' => [static fn(RelentityInterface $entity) => $entity->without('a'), ['count', 'add', 'change', 'remove']],
-            'joinedWith' => [static fn(RelentityInterface $entity) => $entity->joinedWith('a', 'id'), ['count', 'add', 'change', 'remove']],
+            'selecting' => [static fn(RelentityInterface $entity) => $entity->selecting('a'), ['count', 'grouped count', 'add', 'change', 'remove']],
+            'with' => [static fn(RelentityInterface $entity) => $entity->with('a'), ['count', 'grouped count', 'add', 'change', 'remove']],
+            'without' => [static fn(RelentityInterface $entity) => $entity->without('a'), ['count', 'grouped count', 'add', 'change', 'remove']],
+            'joinedWith' => [static fn(RelentityInterface $entity) => $entity->joinedWith('a', 'id'), ['count', 'grouped count', 'add', 'change', 'remove']],
             'sortedBy' => [static fn(RelentityInterface $entity) => $entity->sortedBy(['a' => 'asc']), ['count']],
-            'concealing' => [static fn(RelentityInterface $entity) => $entity->concealing('a'), ['count']],
-            'revealing' => [static fn(RelentityInterface $entity) => $entity->revealing('a'), ['count']],
+            'groupedBy' => [static fn(RelentityInterface $entity) => $entity->groupedBy('a'), ['fetch', 'add', 'change', 'remove']],
+            'concealing' => [static fn(RelentityInterface $entity) => $entity->concealing('a'), ['count', 'grouped count']],
+            'revealing' => [static fn(RelentityInterface $entity) => $entity->revealing('a'), ['count', 'grouped count']],
             'limitedTo' => [static fn(RelentityInterface $entity) => $entity->limitedTo(1), ['count', 'remove']],
             'skipping' => [static fn(RelentityInterface $entity) => $entity->skipping(1), ['count', 'remove']],
         ];
@@ -537,6 +555,31 @@ final class RelentityTest extends TestCase
     public function testCountIsAShorthandOfAggregate(): void
     {
         $this->assertSame(Employee::aggregate('COUNT(*) AS "count"')->asSQL(), Employee::count()->asSQL());
+    }
+
+    public function testGroupedAggregateIgnoresDefaultOrderAndLimit(): void
+    {
+        $this->assertSame(
+            'SELECT "name", count(*) AS "n" FROM "employee" WHERE "deleted" = FALSE GROUP BY ("name")',
+            Employee::aggregate(['"name"', 'count(*) AS "n"'])->groupedBy('name')->asSQL(),
+        );
+    }
+
+    #[DataProvider('invalidGroupProvider')]
+    public function testGroupedByRequiresColumnNames(Closure $call, string $message): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+        $call(Plain::count());
+    }
+
+    public static function invalidGroupProvider(): array
+    {
+        return [
+            'no columns' => [static fn(RelentityInterface $entity) => $entity->groupedBy(), 'groupedBy() requires non-empty column names'],
+            'an empty column' => [static fn(RelentityInterface $entity) => $entity->groupedBy('a', ''), 'groupedBy() requires non-empty column names'],
+            'named arguments' => [static fn(RelentityInterface $entity) => $entity->groupedBy(column: 'a'), 'groupedBy() does not accept named arguments'],
+        ];
     }
 
     #[DataProvider('emptyAggregateProvider')]

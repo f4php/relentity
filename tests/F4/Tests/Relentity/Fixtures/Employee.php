@@ -54,6 +54,12 @@ class Employee extends AbstractRelentity
         'projectCount' => static function (): RelationInterface {
             return Value::of(Project::count())->via('employee_project');
         },
+        'hoursPerProject' => static function (): RelationInterface {
+            return Many::of(Timesheet::aggregate(['"projectUUID"', 'sum("hours") AS "hours"'])->groupedBy('projectUUID')->sortedBy(['hours' => 'desc']));
+        },
+        'topProject' => static function (): RelationInterface {
+            return One::of(Timesheet::aggregate(['"projectUUID"', 'sum("hours") AS "hours"'])->groupedBy('projectUUID')->sortedBy(['hours' => 'desc'])->limitedTo(1));
+        },
         'latestProject' => static function (): RelationInterface {
             return One::of(Project::fetch()->sortedBy(['startedAt' => 'desc']))->via('employee_project');
         },
